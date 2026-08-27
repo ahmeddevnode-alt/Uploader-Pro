@@ -1,0 +1,37 @@
+import { useMemo } from 'react';
+import { Link } from 'wouter';
+import { useGetStats, useGetWatcherStatus, useHealthCheck, useListCollections, useListMedia } from '@workspace/api-client-react';
+import { ArrowUpRight, Clock3, Database, FolderHeart, Heart, Images, LockKeyhole, Sparkles, Tag, UploadCloud } from 'lucide-react';
+import { MediaGrid } from '@/components/media-grid';
+import { PageHeading } from '@/components/uploader-shell';
+
+const storage = (bytes = 0) => bytes > 1_000_000_000 ? `${(bytes / 1_000_000_000).toFixed(1)} GB` : `${(bytes / 1_000_000).toFixed(0)} MB`;
+
+export default function DashboardPage() {
+  const stats = useGetStats();
+  const watcher = useGetWatcherStatus();
+  const health = useHealthCheck();
+  const recent = useListMedia({ view: 'new', limit: 8 });
+  const collections = useListCollections();
+  const statsData = stats.data;
+  const healthLabel = health.data?.status === 'ok' ? 'Operational' : health.isLoading ? 'Checking' : 'Protected';
+  const collectionPreview = useMemo(() => (collections.data || []).slice(0, 3), [collections.data]);
+  return <div className="mx-auto max-w-[1440px]"><PageHeading eyebrow="Good evening, owner" title="Your vault, in focus." description="A clear view of what arrived, what needs attention, and where your archive is growing." action={<Link href="/new" className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground shadow-[0_8px_20px_hsl(var(--primary)/.12)] hover:-translate-y-0.5" data-testid="link-dashboard-upload"><UploadCloud size={16} /> Import media</Link>} />
+    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <StatCard label="Total media" value={statsData ? `${(statsData.totalImages + statsData.totalVideos).toLocaleString()}` : '—'} detail={statsData ? `${statsData.totalImages} photos · ${statsData.totalVideos} videos` : 'Loading archive'} icon={Images} accent="primary" testId="total-media" />
+      <StatCard label="Favourites" value={statsData ? `${statsData.favouritesCount}` : '—'} detail="Your marked moments" icon={Heart} accent="rose" testId="favourites" />
+      <StatCard label="Needs a tag" value={statsData ? `${statsData.untaggedCount}` : '—'} detail="Ready for a little context" icon={Tag} accent="teal" testId="untagged" />
+      <StatCard label="Storage used" value={statsData ? storage(statsData.storageUsed) : '—'} detail={statsData ? `${statsData.masterCount} masters protected` : 'Measuring vault'} icon={Database} accent="violet" testId="storage" />
+    </section>
+
+    <section className="mt-7 grid gap-5 xl:grid-cols-[1.55fr_1fr]">
+      <div className="rounded-2xl border border-border bg-card p-5 shadow-sm md:p-6"><div className="mb-5 flex items-center justify-between"><div><p className="font-mono text-[10px] uppercase tracking-[.16em] text-primary">Freshly secured</p><h2 className="mt-1 font-serif text-xl font-bold tracking-[-.035em]">New arrivals</h2></div><Link href="/new" className="flex items-center gap-1 text-xs font-bold text-muted-foreground hover:text-primary" data-testid="link-see-new">View all <ArrowUpRight size={14} /></Link></div><MediaGrid items={recent.data?.items || []} emptyTitle="Your first memories are waiting" emptyCopy="Drop a folder into your watched directory or import files to see them here." /></div>
+      <div className="space-y-5"><div className="rounded-2xl border border-border bg-card p-5 shadow-sm"><div className="flex items-center justify-between"><div><p className="font-mono text-[10px] uppercase tracking-[.16em] text-accent">Archive pulse</p><h2 className="mt-1 font-serif text-xl font-bold tracking-[-.035em]">System health</h2></div><span className="flex items-center gap-1.5 rounded-full bg-accent/10 px-2.5 py-1 text-[10px] font-bold text-accent"><span className="h-1.5 w-1.5 rounded-full bg-accent" />{healthLabel}</span></div><div className="mt-5 space-y-3"><div className="flex items-center justify-between text-xs"><span className="flex items-center gap-2 text-muted-foreground"><LockKeyhole size={14} className="text-primary" /> Encryption</span><span className="font-mono font-medium text-foreground">AES-256</span></div><div className="flex items-center justify-between text-xs"><span className="flex items-center gap-2 text-muted-foreground"><Clock3 size={14} className="text-accent" /> Watcher</span><span className="font-mono font-medium text-accent">{watcher.data?.watching ? 'Watching' : 'Paused'}</span></div><div className="flex items-center justify-between text-xs"><span className="flex items-center gap-2 text-muted-foreground"><Database size={14} className="text-violet-400" /> Pending import</span><span className="font-mono font-medium">{watcher.data?.pending ?? '—'}</span></div></div></div><div className="rounded-2xl border border-border bg-card p-5 shadow-sm"><div className="flex items-center justify-between"><div><p className="font-mono text-[10px] uppercase tracking-[.16em] text-violet-300">Organize by feeling</p><h2 className="mt-1 font-serif text-xl font-bold tracking-[-.035em]">Collections</h2></div><Link href="/collections" className="text-xs font-bold text-muted-foreground hover:text-primary" data-testid="link-dashboard-collections">Browse</Link></div><div className="mt-4 space-y-3">{collectionPreview.length ? collectionPreview.map((collection) => <Link href="/collections" key={collection.id} className="flex items-center gap-3 rounded-xl p-2 hover:bg-secondary" data-testid={`link-collection-${collection.id}`}><div className="h-10 w-12 overflow-hidden rounded-lg bg-secondary">{collection.coverThumbUrl ? <img src={collection.coverThumbUrl} alt="" className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-primary"><FolderHeart size={16} /></div>}</div><div className="min-w-0 flex-1"><p className="truncate text-xs font-bold">{collection.name}</p><p className="text-[10px] text-muted-foreground">{collection.itemCount} items</p></div><ArrowUpRight size={14} className="text-muted-foreground" /></Link>) : <p className="py-4 text-xs text-muted-foreground">Collections will appear as you create them.</p>}</div></div></div>
+    </section>
+  </div>;
+}
+
+function StatCard({ label, value, detail, icon: Icon, accent, testId }: { label: string; value: string; detail: string; icon: typeof Images; accent: string; testId: string }) {
+  const accentClasses: Record<string, string> = { primary: 'bg-primary/12 text-primary', rose: 'bg-rose-400/10 text-rose-300', teal: 'bg-accent/10 text-accent', violet: 'bg-violet-400/10 text-violet-300' };
+  return <div className="rounded-2xl border border-border bg-card p-5 shadow-sm transition-transform hover:-translate-y-0.5" data-testid={`card-stat-${testId}`}><div className="flex items-start justify-between"><span className={`grid h-9 w-9 place-items-center rounded-xl ${accentClasses[accent]}`}><Icon size={17} /></span><Sparkles size={14} className="text-muted-foreground/30" /></div><p className="mt-5 text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">{label}</p><p className="mt-1 font-serif text-3xl font-bold tracking-[-.045em]" data-testid={`text-stat-${testId}`}>{value}</p><p className="mt-1 text-[11px] text-muted-foreground">{detail}</p></div>;
+}

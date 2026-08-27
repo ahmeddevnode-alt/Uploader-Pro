@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Uploader Pro"
+description = "A private encrypted photo and video gallery with secure uploads, fast thumbnails, duplicate review, tagging, collections, and resumable downloads."
+version = "1.0.0"
+id = "artifacts/uploader-pro"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18202
+
+[services.development]
+run = "pnpm --filter @workspace/uploader-pro run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/uploader-pro", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/uploader-pro/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18202"
+BASE_PATH = "/"

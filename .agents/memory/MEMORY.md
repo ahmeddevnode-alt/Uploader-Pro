@@ -1,0 +1,1 @@
+- [Zod codegen compatibility](zod-codegen-compatibility.md) — keep the workspace Zod major aligned with Orval-generated validator helpers.

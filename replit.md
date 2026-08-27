@@ -1,44 +1,51 @@
-# [Project name]
+# Uploader Pro
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Uploader Pro is a private encrypted photo and video vault with fast galleries, upload workflows, and organization tools.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/api-server run dev` — run the API server
+- `pnpm --filter @workspace/uploader-pro run dev` — run the web vault
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Optional env: `APP_PASSWORD`, `FERNET_PASSWORD`, `FERNET_SALT`, `MEDIA_DIR`, `WATCH_DIR`, `WATCHER_ENABLED`
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - API: Express 5
-- DB: PostgreSQL + Drizzle ORM
+- DB/storage contract: designed for MongoDB plus encrypted disk media storage; the development API currently uses a small in-memory store so the UI is immediately runnable
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec)
 - Build: esbuild (CJS bundle)
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/uploader-pro/src/` — React shell, pages, media grid, and theme
+- `artifacts/api-server/src/routes/uploader.ts` — gallery API surface
+- `artifacts/api-server/src/lib/store.ts` — development media and organization state
+- `lib/api-spec/openapi.yaml` — source of truth for generated client/server contracts
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The client uses session-scoped vault access and attaches the token through the shared generated fetch client.
+- Media browsing uses generated React Query hooks so mutations invalidate the relevant views.
+- The API keeps the legacy password default only as an environment fallback; deployments should set `APP_PASSWORD`.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Users can unlock a private vault, browse recent/all/favourite/untagged media, upload media, edit tags, create collections, manage bookmarks, review duplicates, and start resumable-style decrypt jobs. A watcher status indicator is included for the inbox workflow.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+No additional preferences recorded.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- The Vite production build requires `PORT` and `BASE_PATH`; managed workflows provide them automatically.
+- Run API codegen after changing `lib/api-spec/openapi.yaml`.
 
 ## Pointers
 

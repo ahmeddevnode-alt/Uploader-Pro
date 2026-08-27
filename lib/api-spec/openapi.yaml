@@ -10,6 +10,13 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: auth
+  - name: media
+  - name: collections
+  - name: tags
+  - name: bookmarks
+  - name: duplicates
+  - name: decrypt
 paths:
   /healthz:
     get:
@@ -24,6 +31,233 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "401": { description: Invalid password }
+  /media:
+    get:
+      operationId: listMedia
+      tags: [media]
+      parameters:
+        - { name: view, in: query, schema: { type: string, enum: [new, all, favourites, untagged], default: all } }
+        - { name: type, in: query, schema: { type: string, enum: [image, video] } }
+        - { name: search, in: query, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 40 } }
+      responses:
+        "200":
+          description: Media page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaPage"
+    post:
+      operationId: uploadMedia
+      tags: [media]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/UploadInput"
+      responses:
+        "200":
+          description: Upload results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UploadResult"
+  /media/{id}:
+    delete:
+      operationId: deleteMedia
+      tags: [media]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Deleted }
+  /media/{id}/favourite:
+    post:
+      operationId: toggleFavourite
+      tags: [media]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Updated media
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Media"
+  /media/{id}/tags:
+    post:
+      operationId: setMediaTags
+      tags: [tags]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TagsInput"
+      responses:
+        "200":
+          description: Updated media
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Media"
+  /stats:
+    get:
+      operationId: getStats
+      tags: [media]
+      responses:
+        "200":
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stats"
+  /system/watcher:
+    get:
+      operationId: getWatcherStatus
+      tags: [health]
+      responses:
+        "200":
+          description: Watcher status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WatcherStatus"
+  /collections:
+    get:
+      operationId: listCollections
+      tags: [collections]
+      responses:
+        "200":
+          description: Collections
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Collection" }
+    post:
+      operationId: createCollection
+      tags: [collections]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CollectionInput" }
+      responses:
+        "201":
+          description: Created collection
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Collection" }
+  /collections/{id}:
+    delete:
+      operationId: deleteCollection
+      tags: [collections]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Deleted }
+  /bookmarks:
+    get:
+      operationId: listBookmarks
+      tags: [bookmarks]
+      responses:
+        "200":
+          description: Bookmarks
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Bookmark" }
+    post:
+      operationId: createBookmark
+      tags: [bookmarks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookmarkInput" }
+      responses:
+        "201":
+          description: Created bookmark
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Bookmark" }
+  /duplicates:
+    get:
+      operationId: listDuplicates
+      tags: [duplicates]
+      responses:
+        "200":
+          description: Duplicate groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DuplicateGroup" }
+  /duplicates/scan:
+    post:
+      operationId: scanDuplicates
+      tags: [duplicates]
+      responses:
+        "200":
+          description: Scan result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { groups: { type: integer } }
+                required: [groups]
+  /decrypt/jobs:
+    post:
+      operationId: createDecryptJob
+      tags: [decrypt]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DecryptJobInput" }
+      responses:
+        "202":
+          description: Job queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DecryptJob" }
+  /decrypt/jobs/{id}:
+    get:
+      operationId: getDecryptJob
+      tags: [decrypt]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Job status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DecryptJob" }
 components:
   schemas:
     HealthStatus:
@@ -33,4 +267,115 @@ components:
           type: string
       required:
         - status
+    LoginInput:
+      type: object
+      properties: { password: { type: string } }
+      required: [password]
+    LoginResult:
+      type: object
+      properties: { token: { type: string }, expiresIn: { type: integer } }
+      required: [token, expiresIn]
+    Media:
+      type: object
+      properties:
+        id: { type: string }
+        originalName: { type: string }
+        type: { type: string, enum: [image, video] }
+        thumbUrl: { type: string }
+        fileUrl: { type: string }
+        mime: { type: string }
+        size: { type: integer }
+        favourite: { type: boolean }
+        tags: { type: array, items: { type: string } }
+        hideFromMain: { type: boolean }
+        duplicate: { type: boolean }
+        lost: { type: boolean }
+        createdAt: { type: string }
+      required: [id, originalName, type, thumbUrl, fileUrl, mime, size, favourite, tags, hideFromMain, duplicate, lost, createdAt]
+    MediaPage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Media" } }
+        total: { type: integer }
+        page: { type: integer }
+        limit: { type: integer }
+      required: [items, total, page, limit]
+    UploadInput:
+      type: object
+      properties: { files: { type: string, format: binary } }
+      required: [files]
+    UploadResult:
+      type: object
+      properties:
+        ok: { type: boolean }
+        id: { type: string }
+        originalName: { type: string }
+        duplicate: { type: boolean }
+        existingName: { type: ["string", "null"] }
+      required: [ok, originalName, duplicate]
+    TagsInput:
+      type: object
+      properties: { tags: { type: array, items: { type: string } } }
+      required: [tags]
+    Stats:
+      type: object
+      properties:
+        totalImages: { type: integer }
+        totalVideos: { type: integer }
+        favouritesCount: { type: integer }
+        untaggedCount: { type: integer }
+        collectionCount: { type: integer }
+        masterCount: { type: integer }
+        storageUsed: { type: integer }
+      required: [totalImages, totalVideos, favouritesCount, untaggedCount, collectionCount, masterCount, storageUsed]
+    WatcherStatus:
+      type: object
+      properties:
+        watching: { type: boolean }
+        dir: { type: string }
+        pending: { type: integer }
+        failed: { type: integer }
+        lastImportAt: { type: ["string", "null"] }
+      required: [watching, dir, pending, failed, lastImportAt]
+    Collection:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        itemCount: { type: integer }
+        coverThumbUrl: { type: ["string", "null"] }
+      required: [id, name, itemCount, coverThumbUrl]
+    CollectionInput:
+      type: object
+      properties: { name: { type: string } }
+      required: [name]
+    Bookmark:
+      type: object
+      properties: { id: { type: string }, url: { type: string }, order: { type: integer } }
+      required: [id, url, order]
+    BookmarkInput:
+      type: object
+      properties: { url: { type: string, format: uri } }
+      required: [url]
+    DuplicateGroup:
+      type: object
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [content, name] }
+        media: { type: array, items: { $ref: "#/components/schemas/Media" } }
+      required: [id, kind, media]
+    DecryptJob:
+      type: object
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [queued, processing, done, error] }
+        done: { type: integer }
+        total: { type: integer }
+      required: [id, status, done, total]
+    DecryptJobInput:
+      type: object
+      properties:
+        mediaIds: { type: array, items: { type: string } }
+        format: { type: string, enum: [zip] }
+      required: [format]
 
