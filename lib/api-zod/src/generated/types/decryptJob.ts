@@ -5,11 +5,14 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { DecryptJobProgress } from './decryptJobProgress';
 import type { DecryptJobStatus } from './decryptJobStatus';
 
 export interface DecryptJob {
   id: string;
   status: DecryptJobStatus;
+  progress: DecryptJobProgress;
   done: number;
   total: number;
+  error?: string;
 }

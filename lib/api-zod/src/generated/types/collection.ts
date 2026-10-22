@@ -12,4 +12,5 @@ export interface Collection {
   itemCount: number;
   /** @nullable */
   coverThumbUrl: string | null;
+  mediaIds: string[];
 }

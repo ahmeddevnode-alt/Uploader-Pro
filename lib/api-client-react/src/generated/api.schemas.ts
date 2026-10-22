@@ -66,6 +66,19 @@ export interface TagsInput {
   tags: string[];
 }
 
+export interface TagSummary {
+  name: string;
+  count: number;
+  /** @nullable */
+  coverThumbUrl: string | null;
+}
+
+export interface SystemHealth {
+  status: string;
+  uptimeSeconds: number;
+  watcher: boolean;
+}
+
 export interface Stats {
   totalImages: number;
   totalVideos: number;
@@ -91,10 +104,22 @@ export interface Collection {
   itemCount: number;
   /** @nullable */
   coverThumbUrl: string | null;
+  mediaIds: string[];
 }
 
 export interface CollectionInput {
   name: string;
+}
+
+export interface CollectionItemInput {
+  mediaId: string;
+  hideFromMain?: boolean;
+}
+
+export interface MasterCollection {
+  id: string;
+  name: string;
+  collectionIds: string[];
 }
 
 export interface Bookmark {
@@ -105,6 +130,19 @@ export interface Bookmark {
 
 export interface BookmarkInput {
   url: string;
+}
+
+export type DuplicateResolveInputAction = typeof DuplicateResolveInputAction[keyof typeof DuplicateResolveInputAction];
+
+
+export const DuplicateResolveInputAction = {
+  delete_others: 'delete_others',
+  ignore: 'ignore',
+} as const;
+
+export interface DuplicateResolveInput {
+  keepMediaId?: string;
+  action: DuplicateResolveInputAction;
 }
 
 export type DuplicateGroupKind = typeof DuplicateGroupKind[keyof typeof DuplicateGroupKind];
@@ -131,11 +169,42 @@ export const DecryptJobStatus = {
   error: 'error',
 } as const;
 
+export type DecryptJobProgress = {
+  done: number;
+  total: number;
+};
+
 export interface DecryptJob {
   id: string;
   status: DecryptJobStatus;
+  progress: DecryptJobProgress;
   done: number;
   total: number;
+  error?: string;
+}
+
+export type DecryptJobFilterView = typeof DecryptJobFilterView[keyof typeof DecryptJobFilterView];
+
+
+export const DecryptJobFilterView = {
+  new: 'new',
+  all: 'all',
+  favourites: 'favourites',
+  untagged: 'untagged',
+} as const;
+
+export type DecryptJobFilterType = typeof DecryptJobFilterType[keyof typeof DecryptJobFilterType];
+
+
+export const DecryptJobFilterType = {
+  image: 'image',
+  video: 'video',
+} as const;
+
+export interface DecryptJobFilter {
+  view?: DecryptJobFilterView;
+  type?: DecryptJobFilterType;
+  search?: string;
 }
 
 export type DecryptJobInputFormat = typeof DecryptJobInputFormat[keyof typeof DecryptJobInputFormat];
@@ -147,6 +216,7 @@ export const DecryptJobInputFormat = {
 
 export interface DecryptJobInput {
   mediaIds?: string[];
+  filter?: DecryptJobFilter;
   format: DecryptJobInputFormat;
 }
 
@@ -156,6 +226,7 @@ type?: ListMediaType;
 search?: string;
 page?: number;
 limit?: number;
+includeHidden?: boolean;
 };
 
 export type ListMediaView = typeof ListMediaView[keyof typeof ListMediaView];
@@ -176,7 +247,20 @@ export const ListMediaType = {
   video: 'video',
 } as const;
 
+export type EncryptAllMedia200 = {
+  encrypted: number;
+};
+
+export type ListTagMediaParams = {
+page?: number;
+limit?: number;
+};
+
 export type ScanDuplicates200 = {
   groups: number;
+};
+
+export type ResolveDuplicate200 = {
+  resolved: boolean;
 };
 

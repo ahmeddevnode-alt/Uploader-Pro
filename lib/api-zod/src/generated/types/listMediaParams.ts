@@ -14,4 +14,5 @@ type?: ListMediaType;
 search?: string;
 page?: number;
 limit?: number;
+includeHidden?: boolean;
 };

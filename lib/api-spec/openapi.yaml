@@ -59,6 +59,7 @@ paths:
         - { name: search, in: query, schema: { type: string } }
         - { name: page, in: query, schema: { type: integer, default: 1 } }
         - { name: limit, in: query, schema: { type: integer, default: 40 } }
+        - { name: includeHidden, in: query, schema: { type: boolean, default: false } }
       responses:
         "200":
           description: Media page
@@ -84,6 +85,19 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/UploadResult"
+  /media/encrypt-all:
+    post:
+      operationId: encryptAllMedia
+      tags: [media]
+      responses:
+        "200":
+          description: Plaintext media imported and encrypted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { encrypted: { type: integer } }
+                required: [encrypted]
   /media/{id}:
     delete:
       operationId: deleteMedia
@@ -124,6 +138,53 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Media"
+  /media/{id}/tags/{tag}:
+    delete:
+      operationId: removeMediaTag
+      tags: [tags]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: tag, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Updated media
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Media" }
+  /tags:
+    get:
+      operationId: listTags
+      tags: [tags]
+      responses:
+        "200":
+          description: Tags
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TagSummary" }
+  /tags/{name}/media:
+    get:
+      operationId: listTagMedia
+      tags: [tags]
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 40 } }
+      responses:
+        "200":
+          description: Media tagged with this name
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaPage" }
+  /tags/{name}:
+    delete:
+      operationId: deleteTag
+      tags: [tags]
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Tag deleted }
   /stats:
     get:
       operationId: getStats
@@ -146,6 +207,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WatcherStatus"
+  /system/health:
+    get:
+      operationId: getSystemHealth
+      tags: [health]
+      responses:
+        "200":
+          description: Application and watcher health
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SystemHealth" }
   /collections:
     get:
       operationId: listCollections
@@ -180,6 +251,87 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
         "204": { description: Deleted }
+  /collections/{id}/items:
+    post:
+      operationId: addCollectionItem
+      tags: [collections]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CollectionItemInput" }
+      responses:
+        "200":
+          description: Updated collection
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Collection" }
+  /collections/{id}/items/{mediaId}:
+    delete:
+      operationId: removeCollectionItem
+      tags: [collections]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: mediaId, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Removed }
+  /master-collections:
+    get:
+      operationId: listMasterCollections
+      tags: [collections]
+      responses:
+        "200":
+          description: Master collections
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/MasterCollection" }
+    post:
+      operationId: createMasterCollection
+      tags: [collections]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CollectionInput" }
+      responses:
+        "201":
+          description: Created master collection
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MasterCollection" }
+  /master-collections/{id}:
+    delete:
+      operationId: deleteMasterCollection
+      tags: [collections]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Deleted }
+  /master-collections/{id}/collections/{collectionId}:
+    post:
+      operationId: addCollectionToMaster
+      tags: [collections]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: collectionId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Updated master collection
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MasterCollection" }
+    delete:
+      operationId: removeCollectionFromMaster
+      tags: [collections]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: collectionId, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Removed }
   /bookmarks:
     get:
       operationId: listBookmarks
@@ -206,6 +358,30 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Bookmark" }
+  /bookmarks/{id}:
+    put:
+      operationId: updateBookmark
+      tags: [bookmarks]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookmarkInput" }
+      responses:
+        "200":
+          description: Updated bookmark
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Bookmark" }
+    delete:
+      operationId: deleteBookmark
+      tags: [bookmarks]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Deleted }
   /duplicates:
     get:
       operationId: listDuplicates
@@ -231,6 +407,26 @@ paths:
                 type: object
                 properties: { groups: { type: integer } }
                 required: [groups]
+  /duplicates/{id}/resolve:
+    post:
+      operationId: resolveDuplicate
+      tags: [duplicates]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DuplicateResolveInput" }
+      responses:
+        "200":
+          description: Duplicate group resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { resolved: { type: boolean } }
+                required: [resolved]
   /decrypt/jobs:
     post:
       operationId: createDecryptJob
@@ -258,6 +454,18 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/DecryptJob" }
+  /decrypt/jobs/{id}/download:
+    get:
+      operationId: downloadDecryptJob
+      tags: [decrypt]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: ZIP archive
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
 components:
   schemas:
     HealthStatus:
@@ -317,6 +525,20 @@ components:
       type: object
       properties: { tags: { type: array, items: { type: string } } }
       required: [tags]
+    TagSummary:
+      type: object
+      properties:
+        name: { type: string }
+        count: { type: integer }
+        coverThumbUrl: { type: ["string", "null"] }
+      required: [name, count, coverThumbUrl]
+    SystemHealth:
+      type: object
+      properties:
+        status: { type: string }
+        uptimeSeconds: { type: integer }
+        watcher: { type: boolean }
+      required: [status, uptimeSeconds, watcher]
     Stats:
       type: object
       properties:
@@ -344,11 +566,25 @@ components:
         name: { type: string }
         itemCount: { type: integer }
         coverThumbUrl: { type: ["string", "null"] }
-      required: [id, name, itemCount, coverThumbUrl]
+        mediaIds: { type: array, items: { type: string } }
+      required: [id, name, itemCount, coverThumbUrl, mediaIds]
     CollectionInput:
       type: object
       properties: { name: { type: string } }
       required: [name]
+    CollectionItemInput:
+      type: object
+      properties:
+        mediaId: { type: string }
+        hideFromMain: { type: boolean }
+      required: [mediaId]
+    MasterCollection:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        collectionIds: { type: array, items: { type: string } }
+      required: [id, name, collectionIds]
     Bookmark:
       type: object
       properties: { id: { type: string }, url: { type: string }, order: { type: integer } }
@@ -357,6 +593,12 @@ components:
       type: object
       properties: { url: { type: string, format: uri } }
       required: [url]
+    DuplicateResolveInput:
+      type: object
+      properties:
+        keepMediaId: { type: string }
+        action: { type: string, enum: [delete_others, ignore] }
+      required: [action]
     DuplicateGroup:
       type: object
       properties:
@@ -369,13 +611,27 @@ components:
       properties:
         id: { type: string }
         status: { type: string, enum: [queued, processing, done, error] }
+        progress:
+          type: object
+          properties:
+            done: { type: integer }
+            total: { type: integer }
+          required: [done, total]
         done: { type: integer }
         total: { type: integer }
-      required: [id, status, done, total]
+        error: { type: string }
+      required: [id, status, progress, done, total]
+    DecryptJobFilter:
+      type: object
+      properties:
+        view: { type: string, enum: [new, all, favourites, untagged] }
+        type: { type: string, enum: [image, video] }
+        search: { type: string }
     DecryptJobInput:
       type: object
       properties:
         mediaIds: { type: array, items: { type: string } }
+        filter: { $ref: "#/components/schemas/DecryptJobFilter" }
         format: { type: string, enum: [zip] }
       required: [format]
 

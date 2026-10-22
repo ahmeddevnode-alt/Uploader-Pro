@@ -5,9 +5,11 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { DecryptJobFilter } from './decryptJobFilter';
 import type { DecryptJobInputFormat } from './decryptJobInputFormat';
 
 export interface DecryptJobInput {
   mediaIds?: string[];
+  filter?: DecryptJobFilter;
   format: DecryptJobInputFormat;
 }

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
-import { useGetWatcherStatus } from '@workspace/api-client-react';
-import { Bookmark, Camera, CircleHelp, Copy, FolderHeart, Images, LayoutDashboard, LogOut, Menu, Plus, Search, ShieldCheck, Star, Tag, UploadCloud, X } from 'lucide-react';
+import { getGetStatsQueryKey, getGetWatcherStatusQueryKey, getListMediaQueryKey, useEncryptAllMedia, useGetWatcherStatus } from '@workspace/api-client-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Bookmark, Camera, CircleHelp, Copy, FolderHeart, FolderTree, Images, LayoutDashboard, LoaderCircle, LogOut, Menu, Plus, Search, ShieldCheck, Star, Tag, UploadCloud, X } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 
 const primaryNav = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
@@ -14,6 +16,7 @@ const primaryNav = [
 
 const libraryNav = [
   { href: '/collections', label: 'Collections', icon: FolderHeart },
+  { href: '/master-collections', label: 'Master collections', icon: FolderTree },
   { href: '/duplicates', label: 'Duplicates', icon: Copy },
   { href: '/bookmarks', label: 'Bookmarks', icon: Bookmark },
 ];
@@ -23,7 +26,20 @@ export function UploaderShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [helpOpen, setHelpOpen] = useState(false);
-  const watcher = useGetWatcherStatus();
+  const watcher = useGetWatcherStatus({ query: { refetchInterval: 5000 } });
+  const encryptAll = useEncryptAllMedia();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const runEncryptionSweep = () => encryptAll.mutate(undefined, {
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({ queryKey: getListMediaQueryKey() });
+      void queryClient.invalidateQueries({ queryKey: getGetStatsQueryKey() });
+      void queryClient.invalidateQueries({ queryKey: getGetWatcherStatusQueryKey() });
+      toast({ title: 'Encrypt All Media complete', description: `${result.encrypted} file${result.encrypted === 1 ? '' : 's'} secured.` });
+    },
+    onError: () => toast({ title: 'Could not encrypt media', description: 'Check the watched folder and encryption settings, then try again.', variant: 'destructive' }),
+  });
 
   useEffect(() => {
     if (location !== '/all' && search) setSearch('');
@@ -77,7 +93,12 @@ export function UploaderShell({ children }: { children: ReactNode }) {
             </div>
             <p className="mt-2 truncate font-mono text-[10px] text-muted-foreground">{watcher.data?.dir || 'Encrypted library'}</p>
             {watcher.data?.pending ? <p className="mt-2 text-[11px] text-primary">{watcher.data.pending} waiting to import</p> : null}
+            {watcher.data?.failed ? <p className="mt-2 text-[11px] text-destructive">{watcher.data.failed} import{watcher.data.failed === 1 ? '' : 's'} failed</p> : null}
           </div>
+          <button onClick={runEncryptionSweep} disabled={encryptAll.isPending} className="flex w-full items-center justify-center gap-2 rounded-xl border border-sidebar-border bg-sidebar-accent/55 px-3 py-2.5 text-xs font-bold text-sidebar-accent-foreground hover:border-primary/40 hover:text-primary disabled:opacity-60" data-testid="button-encrypt-all-media">
+            {encryptAll.isPending ? <LoaderCircle size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
+            {encryptAll.isPending ? 'Securing media…' : 'Encrypt all media'}
+          </button>
           <div className="flex items-center gap-3 border-t border-sidebar-border pt-4">
             <span className="grid h-8 w-8 place-items-center rounded-full bg-secondary font-serif text-xs font-bold text-primary">ME</span>
             <div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-sidebar-accent-foreground">Private vault</p><p className="text-[10px] text-muted-foreground">Owner access only</p></div>

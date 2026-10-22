@@ -30,13 +30,15 @@ export const LoginResponse = zod.object({
 export const listMediaQueryViewDefault = `all`;
 export const listMediaQueryPageDefault = 1;
 export const listMediaQueryLimitDefault = 40;
+export const listMediaQueryIncludeHiddenDefault = false;
 
 export const ListMediaQueryParams = zod.object({
   "view": zod.enum(['new', 'all', 'favourites', 'untagged']).default(listMediaQueryViewDefault),
   "type": zod.enum(['image', 'video']).optional(),
   "search": zod.coerce.string().optional(),
   "page": zod.coerce.number().int().default(listMediaQueryPageDefault),
-  "limit": zod.coerce.number().int().default(listMediaQueryLimitDefault)
+  "limit": zod.coerce.number().int().default(listMediaQueryLimitDefault),
+  "includeHidden": zod.coerce.boolean().default(listMediaQueryIncludeHiddenDefault)
 })
 
 export const ListMediaResponse = zod.object({
@@ -73,6 +75,11 @@ export const UploadMediaResponseItem = zod.object({
   "existingName": zod.string().nullish()
 })
 export const UploadMediaResponse = zod.array(UploadMediaResponseItem)
+
+
+export const EncryptAllMediaResponse = zod.object({
+  "encrypted": zod.int()
+})
 
 
 export const DeleteMediaParams = zod.object({
@@ -128,6 +135,77 @@ export const SetMediaTagsResponse = zod.object({
 })
 
 
+export const RemoveMediaTagParams = zod.object({
+  "id": zod.coerce.string(),
+  "tag": zod.coerce.string()
+})
+
+export const RemoveMediaTagResponse = zod.object({
+  "id": zod.string(),
+  "originalName": zod.string(),
+  "type": zod.enum(['image', 'video']),
+  "thumbUrl": zod.string(),
+  "fileUrl": zod.string(),
+  "mime": zod.string(),
+  "size": zod.int(),
+  "favourite": zod.boolean(),
+  "tags": zod.array(zod.string()),
+  "hideFromMain": zod.boolean(),
+  "duplicate": zod.boolean(),
+  "lost": zod.boolean(),
+  "createdAt": zod.string()
+})
+
+
+export const ListTagsResponseItem = zod.object({
+  "name": zod.string(),
+  "count": zod.int(),
+  "coverThumbUrl": zod.string().nullable()
+})
+export const ListTagsResponse = zod.array(ListTagsResponseItem)
+
+
+export const ListTagMediaParams = zod.object({
+  "name": zod.coerce.string()
+})
+
+export const listTagMediaQueryPageDefault = 1;
+export const listTagMediaQueryLimitDefault = 40;
+
+export const ListTagMediaQueryParams = zod.object({
+  "page": zod.coerce.number().int().default(listTagMediaQueryPageDefault),
+  "limit": zod.coerce.number().int().default(listTagMediaQueryLimitDefault)
+})
+
+export const ListTagMediaResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string(),
+  "originalName": zod.string(),
+  "type": zod.enum(['image', 'video']),
+  "thumbUrl": zod.string(),
+  "fileUrl": zod.string(),
+  "mime": zod.string(),
+  "size": zod.int(),
+  "favourite": zod.boolean(),
+  "tags": zod.array(zod.string()),
+  "hideFromMain": zod.boolean(),
+  "duplicate": zod.boolean(),
+  "lost": zod.boolean(),
+  "createdAt": zod.string()
+})),
+  "total": zod.int(),
+  "page": zod.int(),
+  "limit": zod.int()
+})
+
+
+export const DeleteTagParams = zod.object({
+  "name": zod.coerce.string()
+})
+
+export const DeleteTagResponse = zod.void()
+
+
 export const GetStatsResponse = zod.object({
   "totalImages": zod.int(),
   "totalVideos": zod.int(),
@@ -148,11 +226,19 @@ export const GetWatcherStatusResponse = zod.object({
 })
 
 
+export const GetSystemHealthResponse = zod.object({
+  "status": zod.string(),
+  "uptimeSeconds": zod.int(),
+  "watcher": zod.boolean()
+})
+
+
 export const ListCollectionsResponseItem = zod.object({
   "id": zod.string(),
   "name": zod.string(),
   "itemCount": zod.int(),
-  "coverThumbUrl": zod.string().nullable()
+  "coverThumbUrl": zod.string().nullable(),
+  "mediaIds": zod.array(zod.string())
 })
 export const ListCollectionsResponse = zod.array(ListCollectionsResponseItem)
 
@@ -165,7 +251,8 @@ export const CreateCollectionResponse = zod.object({
   "id": zod.string(),
   "name": zod.string(),
   "itemCount": zod.int(),
-  "coverThumbUrl": zod.string().nullable()
+  "coverThumbUrl": zod.string().nullable(),
+  "mediaIds": zod.array(zod.string())
 })
 
 
@@ -174,6 +261,78 @@ export const DeleteCollectionParams = zod.object({
 })
 
 export const DeleteCollectionResponse = zod.void()
+
+
+export const AddCollectionItemParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const AddCollectionItemBody = zod.object({
+  "mediaId": zod.string(),
+  "hideFromMain": zod.boolean().optional()
+})
+
+export const AddCollectionItemResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "itemCount": zod.int(),
+  "coverThumbUrl": zod.string().nullable(),
+  "mediaIds": zod.array(zod.string())
+})
+
+
+export const RemoveCollectionItemParams = zod.object({
+  "id": zod.coerce.string(),
+  "mediaId": zod.coerce.string()
+})
+
+export const RemoveCollectionItemResponse = zod.void()
+
+
+export const ListMasterCollectionsResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "collectionIds": zod.array(zod.string())
+})
+export const ListMasterCollectionsResponse = zod.array(ListMasterCollectionsResponseItem)
+
+
+export const CreateMasterCollectionBody = zod.object({
+  "name": zod.string()
+})
+
+export const CreateMasterCollectionResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "collectionIds": zod.array(zod.string())
+})
+
+
+export const DeleteMasterCollectionParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const DeleteMasterCollectionResponse = zod.void()
+
+
+export const AddCollectionToMasterParams = zod.object({
+  "id": zod.coerce.string(),
+  "collectionId": zod.coerce.string()
+})
+
+export const AddCollectionToMasterResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "collectionIds": zod.array(zod.string())
+})
+
+
+export const RemoveCollectionFromMasterParams = zod.object({
+  "id": zod.coerce.string(),
+  "collectionId": zod.coerce.string()
+})
+
+export const RemoveCollectionFromMasterResponse = zod.void()
 
 
 export const ListBookmarksResponseItem = zod.object({
@@ -193,6 +352,28 @@ export const CreateBookmarkResponse = zod.object({
   "url": zod.string(),
   "order": zod.int()
 })
+
+
+export const UpdateBookmarkParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const UpdateBookmarkBody = zod.object({
+  "url": zod.url()
+})
+
+export const UpdateBookmarkResponse = zod.object({
+  "id": zod.string(),
+  "url": zod.string(),
+  "order": zod.int()
+})
+
+
+export const DeleteBookmarkParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const DeleteBookmarkResponse = zod.void()
 
 
 export const ListDuplicatesResponseItem = zod.object({
@@ -222,16 +403,40 @@ export const ScanDuplicatesResponse = zod.object({
 })
 
 
+export const ResolveDuplicateParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const ResolveDuplicateBody = zod.object({
+  "keepMediaId": zod.string().optional(),
+  "action": zod.enum(['delete_others', 'ignore'])
+})
+
+export const ResolveDuplicateResponse = zod.object({
+  "resolved": zod.boolean()
+})
+
+
 export const CreateDecryptJobBody = zod.object({
   "mediaIds": zod.array(zod.string()).optional(),
+  "filter": zod.object({
+  "view": zod.enum(['new', 'all', 'favourites', 'untagged']).optional(),
+  "type": zod.enum(['image', 'video']).optional(),
+  "search": zod.string().optional()
+}).optional(),
   "format": zod.enum(['zip'])
 })
 
 export const CreateDecryptJobResponse = zod.object({
   "id": zod.string(),
   "status": zod.enum(['queued', 'processing', 'done', 'error']),
+  "progress": zod.object({
   "done": zod.int(),
   "total": zod.int()
+}),
+  "done": zod.int(),
+  "total": zod.int(),
+  "error": zod.string().optional()
 })
 
 
@@ -242,8 +447,20 @@ export const GetDecryptJobParams = zod.object({
 export const GetDecryptJobResponse = zod.object({
   "id": zod.string(),
   "status": zod.enum(['queued', 'processing', 'done', 'error']),
+  "progress": zod.object({
   "done": zod.int(),
   "total": zod.int()
+}),
+  "done": zod.int(),
+  "total": zod.int(),
+  "error": zod.string().optional()
 })
+
+
+export const DownloadDecryptJobParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const DownloadDecryptJobResponse = zod.unknown()
 
 
