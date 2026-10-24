@@ -1,2 +1,3 @@
 - [Zod codegen compatibility](zod-codegen-compatibility.md) — keep the workspace Zod major aligned with Orval-generated validator helpers.
 - [Uploader Pro scope](uploader-pro-scope.md) — do not add session history or Google Photos backup to this app.
+- [Media hash index](media-hash-index.md) — keep SHA-256 indexed but non-unique; legacy vaults can contain multiple records for identical content.

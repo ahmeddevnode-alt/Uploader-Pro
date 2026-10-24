@@ -4,12 +4,17 @@ const recordSchema = new Schema(
   { _id: { type: String, required: true } },
   { strict: false, versionKey: false, minimize: false },
 );
-recordSchema.index({ sha256: 1 }, { unique: true, sparse: true });
 
-const makeModel = (name: string, collection: string) =>
-  mongoose.models[name] ?? mongoose.model(name, recordSchema, collection);
+const mediaSchema = new Schema(
+  { _id: { type: String, required: true } },
+  { strict: false, versionKey: false, minimize: false },
+);
+mediaSchema.index({ sha256: 1 }, { sparse: true });
 
-const MediaRecord = makeModel("UploaderMedia", "media");
+const makeModel = (name: string, collection: string, schema: Schema = recordSchema) =>
+  mongoose.models[name] ?? mongoose.model(name, schema, collection);
+
+const MediaRecord = makeModel("UploaderMedia", "media", mediaSchema);
 const TagRecord = makeModel("UploaderTag", "tags");
 const CollectionRecord = makeModel("UploaderCollection", "collections");
 const MasterCollectionRecord = makeModel("UploaderMasterCollection", "masterCollections");
@@ -54,6 +59,15 @@ async function replaceRecords(model: typeof MediaRecord, records: Record<string,
 
 export async function connectMongo(uri: string) {
   await mongoose.connect(uri, { serverSelectionTimeoutMS: 10_000 });
+  let indexes: Awaited<ReturnType<typeof MediaRecord.collection.indexes>> = [];
+  try {
+    indexes = await MediaRecord.collection.indexes();
+  } catch (error) {
+    if ((error as { code?: number }).code !== 26) throw error;
+  }
+  const uniqueHashIndex = indexes.find((index) => index.unique && index.key.sha256 === 1);
+  if (uniqueHashIndex?.name) await MediaRecord.collection.dropIndex(uniqueHashIndex.name);
+  await MediaRecord.collection.createIndex({ sha256: 1 }, { sparse: true });
 }
 
 export async function loadVaultState(): Promise<StoredState> {
