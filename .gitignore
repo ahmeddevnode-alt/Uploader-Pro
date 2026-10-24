@@ -11,6 +11,12 @@ out-tsc
 # dependencies
 node_modules
 
+# local credentials and vault data
+/.env
+/.data/
+/media/
+/watch_inbox/
+
 # IDEs and editors
 /.idea
 .project

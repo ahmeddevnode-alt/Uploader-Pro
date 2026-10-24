@@ -20,29 +20,27 @@ Private media storage is provisioned for the Replit app. Do not paste secret val
 
 ## Run it on your own computer
 
-You need Node.js 24 or newer and `pnpm`. After downloading and extracting the project:
+You need Node.js 24 or newer and `pnpm`. After downloading and extracting the project, create a local environment file:
 
 ```sh
+cp .env.example .env
 pnpm install
 ```
 
-Set `MONGO_URI` and `FERNET_PASSWORD` in your local environment or secret manager before starting. Set a fresh `SESSION_SECRET` for any environment accessible outside your computer. Replit Secrets are not included in the project ZIP.
+On Windows PowerShell, use `Copy-Item .env.example .env` instead. Edit `.env` and set `FERNET_PASSWORD` (use the same value as the old app to read legacy media). `APP_PASSWORD` can optionally set a separate sign-in password. `MONGO_URI` is needed to connect to the persistent vault; if left blank, the app uses local development state. Set a unique `SESSION_SECRET` before exposing the app beyond your computer. Replit Secrets are not included in the project ZIP.
 
-Start the API in one terminal:
-
-```sh
-PORT=8080 pnpm --filter @workspace/api-server run dev
-```
-
-Start the web app in a second terminal:
+Start the entire project from the workspace root with one command:
 
 ```sh
-PORT=5173 BASE_PATH=/ pnpm --filter @workspace/uploader-pro run dev
+pnpm start
 ```
 
-Then open `http://localhost:5173`. The local web server forwards `/api` requests to the API on port `8080`. In Replit, the artifact router sends `/api` requests to the API workflow.
+`start.mjs` builds the API, then starts the API and web app together. Press **Ctrl+C** to stop both. The default local URLs are:
 
-When App Storage is unavailable outside Replit, encrypted media is stored on local disk. `MEDIA_DIR` changes the media folder, and `WATCH_DIR` changes the folder monitored for new files. Both default to folders in the project directory.
+- Web app: `http://localhost:5173`
+- API: `http://localhost:8080`
+
+Change `WEB_PORT` or `API_PORT` in `.env` if those ports are already in use. The web app forwards `/api` requests to the local API. When Replit App Storage is unavailable, encrypted media is stored on local disk; `MEDIA_DIR` and `WATCH_DIR` can change the media and watched-folder locations.
 
 ## Download the project or its media
 
