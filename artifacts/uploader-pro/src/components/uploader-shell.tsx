@@ -26,7 +26,7 @@ export function UploaderShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [helpOpen, setHelpOpen] = useState(false);
-  const watcher = useGetWatcherStatus({ query: { refetchInterval: 5000 } });
+  const watcher = useGetWatcherStatus({ query: { queryKey: getGetWatcherStatusQueryKey(), refetchInterval: 5000 } });
   const encryptAll = useEncryptAllMedia();
   const queryClient = useQueryClient();
   const { toast } = useToast();

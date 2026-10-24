@@ -1,1 +1,2 @@
 - [Zod codegen compatibility](zod-codegen-compatibility.md) — keep the workspace Zod major aligned with Orval-generated validator helpers.
+- [Uploader Pro scope](uploader-pro-scope.md) — do not add session history or Google Photos backup to this app.

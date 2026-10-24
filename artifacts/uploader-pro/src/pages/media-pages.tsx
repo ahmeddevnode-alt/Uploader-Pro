@@ -13,7 +13,7 @@ export function MediaPage({ view, title, description }: { view: ListMediaParams[
   const [sort, setSort] = useState('recent');
   const [type, setType] = useState<'all' | 'image' | 'video'>('all');
   const typeParam = type === 'all' ? undefined : type;
-  const query = useListMedia({ view, limit: 100, type: typeParam }, { query: { refetchInterval: view === 'new' ? 10000 : false, refetchOnWindowFocus: true } });
+  const query = useListMedia({ view, limit: 100, type: typeParam }, { query: { queryKey: getListMediaQueryKey({ view, limit: 100, type: typeParam }), refetchInterval: view === 'new' ? 10000 : false, refetchOnWindowFocus: true } });
   const imageCount = useListMedia({ view, type: 'image', limit: 1 });
   const videoCount = useListMedia({ view, type: 'video', limit: 1 });
   const items = useMemo(() => { const list = [...(query.data?.items || [])].filter((media) => !media.hideFromMain && media.originalName.toLowerCase().includes(search.toLowerCase())); return list.sort((a, b) => sort === 'name' ? a.originalName.localeCompare(b.originalName) : sort === 'oldest' ? +new Date(a.createdAt) - +new Date(b.createdAt) : +new Date(b.createdAt) - +new Date(a.createdAt)); }, [query.data?.items, search, sort]);
@@ -25,7 +25,7 @@ export function NewUploadsPage() {
   const [dragging, setDragging] = useState(false);
   const [type, setType] = useState<'all' | 'image' | 'video'>('all');
   const typeParam = type === 'all' ? undefined : type;
-  const recent = useListMedia({ view: 'new', limit: 100, type: typeParam }, { query: { refetchInterval: 10000, refetchOnWindowFocus: true } });
+  const recent = useListMedia({ view: 'new', limit: 100, type: typeParam }, { query: { queryKey: getListMediaQueryKey({ view: 'new', limit: 100, type: typeParam }), refetchInterval: 10000, refetchOnWindowFocus: true } });
   const imageCount = useListMedia({ view: 'new', type: 'image', limit: 1 });
   const videoCount = useListMedia({ view: 'new', type: 'video', limit: 1 });
   const queryClient = useQueryClient();
