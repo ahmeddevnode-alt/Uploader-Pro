@@ -587,14 +587,24 @@ router.post("/import/vault", importMultipart.single("file"), async (req, res) =>
 
     try {
       const isVid = /\.(mp4|mov|webm)$/i.test(origName);
-      const item: MediaItem = {
+      const existing = media.find(m => m.sha256 === sha256) ?? media.find(m => m.originalName === origName);
+      const item: MediaItem = existing ?? {
         id: makeId("m"), originalName: origName, type: isVid ? "video" : "image",
         thumbUrl: "", fileUrl: "", mime: isVid ? "video/mp4" : "image/jpeg",
-        size: plain.length, favourite: favSet.has(origName),
-        tags: (tagsData[origName] ?? []).map(t => t.trim()).filter(Boolean),
+        size: 0, favourite: false, tags: [],
         hideFromMain: false, duplicate: false, lost: false,
         createdAt: new Date().toISOString(), sha256,
       };
+      if (existing) {
+        item.type = isVid ? "video" : "image";
+        item.mime = isVid ? "video/mp4" : "image/jpeg";
+        item.sha256 = sha256;
+        item.lost = false;
+      }
+      item.size = plain.length;
+      item.favourite = favSet.has(origName);
+      const wantTags = (tagsData[origName] ?? []).map(t => t.trim()).filter(Boolean);
+      item.tags = Array.from(new Set([...item.tags, ...wantTags]));
       let thumb: Buffer | undefined;
       const te = zip.getEntry(`pics/${origName}`);
       if (te) {
@@ -606,7 +616,8 @@ router.post("/import/vault", importMultipart.single("file"), async (req, res) =>
         catch { thumb = undefined; }
       }
       await writeEncryptedMedia(item, plain, thumb);
-      media.unshift(item); n2i.set(origName, item); imported++;
+      if (!existing) media.unshift(item);
+      n2i.set(origName, item); imported++;
     } catch { failed++; }
   }
 
