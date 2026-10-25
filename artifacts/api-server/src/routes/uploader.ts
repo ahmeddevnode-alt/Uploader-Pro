@@ -584,8 +584,6 @@ router.post("/import/vault", importMultipart.single("file"), async (req, res) =>
     catch { decErr++; try { plain = ee.getData(); } catch { failed++; continue; } }
 
     const sha256 = crypto.createHash("sha256").update(plain).digest("hex");
-    const dup = media.find(m => m.sha256 === sha256);
-    if (dup) { n2i.set(origName, dup); skipped++; continue; }
 
     try {
       const isVid = /\.(mp4|mov|webm)$/i.test(origName);
@@ -599,8 +597,11 @@ router.post("/import/vault", importMultipart.single("file"), async (req, res) =>
       };
       let thumb: Buffer | undefined;
       const te = zip.getEntry(`pics/${origName}`);
-      if (te) { thumb = te.getData(); }
-      else if (!isVid) {
+      if (te) {
+        try { thumb = decryptPdfFernet(te.getData()); }
+        catch { thumb = undefined; }
+      }
+      if (!thumb && !isVid) {
         try { thumb = await sharp(plain).rotate().resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true }).webp({ quality: 72 }).toBuffer(); }
         catch { thumb = undefined; }
       }
@@ -650,7 +651,7 @@ router.post("/import/vault", importMultipart.single("file"), async (req, res) =>
 
   saveState(); await flushState();
   return res.json({ ok: true, imported, skipped, failed, decryptErrors: decErr, collectionsImported: colsAdded, bookmarksImported: bkAdded,
-    message: `Imported ${imported} media (${skipped} already present, ${failed} failed, ${decErr} decrypt errors). ${colsAdded} collections and ${bkAdded} bookmarks added.` });
+    message: `Imported ${imported} media (${skipped} not found in archive, ${failed} failed, ${decErr} decrypt errors). ${colsAdded} collections and ${bkAdded} bookmarks added.` });
 });
 
 export default router;

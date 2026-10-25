@@ -668,7 +668,7 @@ function ImportVaultDialog({
               </p>
             ))}
             <p className="mt-3 text-[10px] text-muted-foreground/70">
-              Duplicate filenames are skipped. Media is re-encrypted with your vault key.
+              All matching media files are imported. Media is re-encrypted with your vault key.
             </p>
           </div>
         )}
@@ -746,7 +746,7 @@ function ImportVaultDialog({
               <div className="grid grid-cols-2 gap-2">
                 {[
                   { label: "Media imported", value: result.imported, color: "text-accent" },
-                  { label: "Already in vault", value: result.skipped, color: "text-muted-foreground" },
+                  { label: "Skipped (not in archive)", value: result.skipped, color: "text-muted-foreground" },
                   { label: "Collections added", value: result.collectionsImported, color: "text-violet-400" },
                   { label: "Bookmarks added", value: result.bookmarksImported, color: "text-primary" },
                 ].map(({ label, value, color }) => (
