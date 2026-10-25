@@ -4,16 +4,17 @@ import {
   useGetStats,
   useGetWatcherStatus,
   useHealthCheck,
+  useListBookmarks,
   useListCollections,
+  useListMasterCollections,
   useListMedia,
+  useListTags,
   useDeleteMedia,
   customFetch,
 } from "@workspace/api-client-react";
 import {
-  ArrowUpRight,
   Clock3,
   Database,
-  FolderHeart,
   Heart,
   Images,
   LockKeyhole,
@@ -30,7 +31,6 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-import { MediaGrid } from "@/components/media-grid";
 import { PageHeading } from "@/components/uploader-shell";
 import {
   AlertDialog,
@@ -54,11 +54,29 @@ export default function DashboardPage() {
   const stats = useGetStats();
   const watcher = useGetWatcherStatus();
   const health = useHealthCheck();
-  const recent = useListMedia({ view: "new", limit: 8 });
-  const collections = useListCollections();
   const allMedia = useListMedia({ view: "all", limit: 1000 });
+  const tags = useListTags();
+  const collections = useListCollections();
+  const masterCollections = useListMasterCollections();
+  const bookmarks = useListBookmarks();
   const deleteMedia = useDeleteMedia();
   const { toast } = useToast();
+  const refreshAll = () => Promise.all([
+    allMedia.refetch(),
+    stats.refetch(),
+    watcher.refetch(),
+    tags.refetch(),
+    collections.refetch(),
+    masterCollections.refetch(),
+    bookmarks.refetch(),
+  ]);
+
+  const collectionPreview = useMemo(
+    () => (collections.data || []).slice(0, 3),
+    [collections.data],
+  );
+
+  const mediaList = allMedia.data?.items || [];
 
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
   const [deleteAllPending, setDeleteAllPending] = useState(false);
@@ -72,13 +90,6 @@ export default function DashboardPage() {
       : health.isLoading
         ? "Checking"
         : "Protected";
-
-  const collectionPreview = useMemo(
-    () => (collections.data || []).slice(0, 3),
-    [collections.data],
-  );
-
-  const mediaList = allMedia.data?.items || [];
 
   const runDeleteAll = async () => {
     if (deleteAllPending) return;
@@ -111,17 +122,11 @@ export default function DashboardPage() {
         }
       }
 
-      await Promise.all([
-        allMedia.refetch(),
-        stats.refetch(),
-        watcher.refetch(),
-        recent.refetch(),
-        collections.refetch(),
-      ]);
+      await refreshAll();
 
       toast({
-        title: "All media deleted",
-        description: `${deleted} of ${total} media items purged from the vault.`,
+        title: "Vault wiped",
+        description: `${deleted} of ${total} media items and all collections, tags, and bookmarks were removed.`,
       });
 
       setDeleteAllOpen(false);
@@ -129,12 +134,11 @@ export default function DashboardPage() {
       toast({
         title: "Delete failed",
         description:
-          "Some media could not be deleted. Refresh the dashboard and try again.",
+          "Some items could not be deleted. Refresh the dashboard and try again.",
         variant: "destructive",
       });
 
-      void allMedia.refetch();
-      void stats.refetch();
+      void refreshAll();
     } finally {
       setDeleteAllPending(false);
     }
@@ -179,7 +183,7 @@ export default function DashboardPage() {
                   data-testid="button-delete-all-media"
                 >
                   <Trash2 size={16} />
-                  Delete all
+                  Wipe vault
                 </button>
               </AlertDialogTrigger>
 
@@ -190,13 +194,13 @@ export default function DashboardPage() {
 
                     <div>
                       <AlertDialogTitle>
-                        Delete all media?
+                        Wipe entire vault?
                       </AlertDialogTitle>
 
                       <AlertDialogDescription>
                         This permanently erases every photo and video from disk
-                        and removes all MongoDB database records. This action
-                        cannot be undone.
+                        and removes all collections, master collections, tags,
+                        and bookmarks. This action cannot be undone.
                       </AlertDialogDescription>
                     </div>
                   </div>
@@ -225,10 +229,10 @@ export default function DashboardPage() {
                           size={16}
                           className="animate-spin"
                         />
-                        Purging vault...
+                        Wiping vault...
                       </div>
                     ) : (
-                      "Delete all media"
+                      "Wipe entire vault"
                     )}
                   </AlertDialogAction>
                 </AlertDialogFooter>
@@ -242,9 +246,7 @@ export default function DashboardPage() {
       <ImportVaultDialog
         open={importVaultOpen}
         onOpenChange={setImportVaultOpen}
-        onSuccess={() => {
-          void Promise.all([allMedia.refetch(), stats.refetch(), recent.refetch(), collections.refetch(), watcher.refetch()]);
-        }}
+        onSuccess={() => { void refreshAll(); }}
       />
 
       {/* Statistics */}
@@ -300,38 +302,9 @@ export default function DashboardPage() {
         />
       </section>
 
-      {/* Recent media and sidebar */}
-      <section className="mt-7 grid gap-5 xl:grid-cols-[1.55fr_1fr]">
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm md:p-6">
-          <div className="mb-5 flex items-center justify-between">
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[.16em] text-primary">
-                Freshly secured
-              </p>
-              <h2 className="mt-1 font-serif text-xl font-bold tracking-[-.035em]">
-                New arrivals
-              </h2>
-            </div>
-
-            <Link
-              href="/new"
-              className="flex items-center gap-1 text-xs font-bold text-muted-foreground hover:text-primary"
-              data-testid="link-see-new"
-            >
-              View all <ArrowUpRight size={14} />
-            </Link>
-          </div>
-
-          <MediaGrid
-            items={recent.data?.items || []}
-            emptyTitle="Your first memories are waiting"
-            emptyCopy="Drop a folder into your watched directory or import files to see them here."
-          />
-        </div>
-
-        <div className="space-y-5">
-          {/* System health */}
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+      {/* System health */}
+      <section className="mt-7">
+        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-mono text-[10px] uppercase tracking-[.16em] text-accent">
@@ -378,73 +351,6 @@ export default function DashboardPage() {
                   {watcher.data?.pending ?? "—"}
                 </span>
               </div>
-            </div>
-          </div>
-
-          {/* Collections */}
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-mono text-[10px] uppercase tracking-[.16em] text-violet-300">
-                  Organize by feeling
-                </p>
-                <h2 className="mt-1 font-serif text-xl font-bold tracking-[-.035em]">
-                  Collections
-                </h2>
-              </div>
-
-              <Link
-                href="/collections"
-                className="text-xs font-bold text-muted-foreground hover:text-primary"
-                data-testid="link-dashboard-collections"
-              >
-                Browse
-              </Link>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              {collectionPreview.length ? (
-                collectionPreview.map((collection) => (
-                  <Link
-                    href="/collections"
-                    key={collection.id}
-                    className="flex items-center gap-3 rounded-xl p-2 hover:bg-secondary"
-                    data-testid={`link-collection-${collection.id}`}
-                  >
-                    <div className="h-10 w-12 overflow-hidden rounded-lg bg-secondary">
-                      {collection.coverThumbUrl ? (
-                        <img
-                          src={collection.coverThumbUrl}
-                          alt=""
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <div className="grid h-full place-items-center text-primary">
-                          <FolderHeart size={16} />
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-bold">
-                        {collection.name}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {collection.itemCount} items
-                      </p>
-                    </div>
-
-                    <ArrowUpRight
-                      size={14}
-                      className="text-muted-foreground"
-                    />
-                  </Link>
-                ))
-              ) : (
-                <p className="py-4 text-xs text-muted-foreground">
-                  Collections will appear as you create them.
-                </p>
-              )}
             </div>
           </div>
         </div>
@@ -517,6 +423,7 @@ type ImportResult = {
   skipped: number;
   failed: number;
   collectionsImported: number;
+  masterCollectionsImported?: number;
   bookmarksImported: number;
   message: string;
 };
@@ -656,9 +563,10 @@ function ImportVaultDialog({
           <div className="mt-5 rounded-xl bg-secondary/60 p-4 text-xs text-muted-foreground space-y-1.5">
             <p className="font-semibold text-foreground mb-2">What will be imported:</p>
             {[
-              "All media files (images & videos) from Uploaded_Sessions/",
+              "All media files (images & videos) from pics/ and Uploaded_Sessions/",
               "Tags from tags/tags.json",
               "Collections from collections/*.json",
+              "Master collections from collections/master_collections.json",
               "Favourites from favourites.json",
               "Bookmarks from bookmarks.json",
             ].map((item) => (
@@ -748,7 +656,8 @@ function ImportVaultDialog({
                   { label: "Media imported", value: result.imported, color: "text-accent" },
                   { label: "Skipped (not in archive)", value: result.skipped, color: "text-muted-foreground" },
                   { label: "Collections added", value: result.collectionsImported, color: "text-violet-400" },
-                  { label: "Bookmarks added", value: result.bookmarksImported, color: "text-primary" },
+                  { label: "Master groups added", value: result.masterCollectionsImported ?? 0, color: "text-primary" },
+                  { label: "Bookmarks added", value: result.bookmarksImported, color: "text-blue-400" },
                 ].map(({ label, value, color }) => (
                   <div key={label} className="rounded-lg bg-secondary/60 p-2.5">
                     <p className={`font-mono text-xl font-bold ${color}`}>{value}</p>
