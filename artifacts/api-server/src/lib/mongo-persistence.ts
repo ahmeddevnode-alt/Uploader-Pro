@@ -43,18 +43,24 @@ function fromDocument<T extends Record<string, unknown>>(document: Record<string
 
 async function replaceRecords(model: typeof MediaRecord, records: Record<string, unknown>[]) {
   if (records.length) {
+    const ids = records.map((record) => String(record.id ?? (record as { _id?: unknown })._id));
     await model.bulkWrite(
-      records.map((record) => ({
-        replaceOne: {
-          filter: { _id: String(record.id) },
-          replacement: { ...record, _id: String(record.id) },
-          upsert: true,
-        },
-      })),
-      { ordered: true },
+      records.map((record) => {
+        const id = String(record.id ?? (record as { _id?: unknown })._id);
+        return {
+          replaceOne: {
+            filter: { _id: id },
+            replacement: { ...record, _id: id },
+            upsert: true,
+          },
+        };
+      }),
+      { ordered: false },
     );
+    await model.deleteMany({ _id: { $nin: ids } });
+  } else {
+    await model.deleteMany({});
   }
-  await model.deleteMany({ _id: { $nin: records.map((record) => String(record.id)) } });
 }
 
 export async function connectMongo(uri: string) {
@@ -68,6 +74,14 @@ export async function connectMongo(uri: string) {
   const uniqueHashIndex = indexes.find((index) => index.unique && index.key.sha256 === 1);
   if (uniqueHashIndex?.name) await MediaRecord.collection.dropIndex(uniqueHashIndex.name);
   await MediaRecord.collection.createIndex({ sha256: 1 }, { sparse: true });
+
+  try {
+    const colIndexes = await CollectionRecord.collection.indexes();
+    const nameIndex = colIndexes.find((index) => index.unique && index.key.name === 1);
+    if (nameIndex?.name) await CollectionRecord.collection.dropIndex(nameIndex.name);
+  } catch {
+    // ignore
+  }
 }
 
 export async function loadVaultState(): Promise<StoredState> {
@@ -89,7 +103,7 @@ export async function saveVaultState(state: StoredState) {
   const tags = Array.from(
     new Set(state.media.flatMap((item) => (Array.isArray(item.tags) ? item.tags : [])).map(String)),
   ).map((name) => ({ id: name, name, createdAt: new Date().toISOString() }));
-  await Promise.all([
+  await Promise.allSettled([
     replaceRecords(MediaRecord, state.media),
     replaceRecords(CollectionRecord, state.collections),
     replaceRecords(MasterCollectionRecord, state.masterCollections),

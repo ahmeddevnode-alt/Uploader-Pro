@@ -148,8 +148,9 @@ export function decryptFernet(token: Buffer) {
   const signature = raw.subarray(-32);
   const expected = crypto.createHmac("sha256", derived.subarray(0, 16)).update(body).digest();
   if (!crypto.timingSafeEqual(expected, signature)) throw new Error("Invalid encrypted media token");
-  const decipher = crypto.createDecipheriv("aes-128-cbc", derived.subarray(16), body.subarray(25, 41));
-  return Buffer.concat([decipher.update(body.subarray(41)), decipher.final()]);
+  // Fernet body layout: version(1) + timestamp(8) + IV(16) + ciphertext
+  const decipher = crypto.createDecipheriv("aes-128-cbc", derived.subarray(16), body.subarray(9, 25));
+  return Buffer.concat([decipher.update(body.subarray(25)), decipher.final()]);
 }
 
 export function encryptedMediaPath(item: MediaItem) {

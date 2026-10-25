@@ -5,7 +5,8 @@ import path from "node:path";
 import archiver from "archiver";
 import jwt from "jsonwebtoken";
 import sharp from "sharp";
-import { collections, bookmarks, masterCollections, decryptJobs, media, type MediaItem, saveState, writeEncryptedMedia, readDecryptedMedia, readDecryptedThumbnail, removeMediaFiles, getWatcherStatus, encryptPlaintextSweep, persistDecryptJob } from "../lib/store";
+import AdmZip from "adm-zip";
+import { collections, bookmarks, masterCollections, decryptJobs, media, type MediaItem, saveState, flushState, writeEncryptedMedia, readDecryptedMedia, readDecryptedThumbnail, removeMediaFiles, getWatcherStatus, encryptPlaintextSweep, persistDecryptJob } from "../lib/store";
 import multer from "multer";
 
 const router: IRouter = Router();
@@ -24,7 +25,8 @@ const verifyMediaSignature = (id: string, expires: unknown, signature: unknown) 
   return signature.length === expected.length && crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
 };
 const collectionView = (collection: typeof collections[number]) => {
-  const cover = media.find((item) => collection.mediaIds.includes(item.id));
+  const mediaIds = collection.mediaIds ?? [];
+  const cover = media.find((item) => mediaIds.includes(item.id));
   return { ...collection, coverThumbUrl: cover?.encPath ? signMedia(cover.id, "thumb") : collection.coverThumbUrl };
 };
 
@@ -126,15 +128,16 @@ router.post("/media/upload", multipart.array("files", 20), async (req, res) => {
 });
 
 router.get("/media/:id/file", async (req, res) => {
-  const item = media.find((candidate) => candidate.id === req.params.id);
+  const item = media.find((candidate) => String(candidate.id) === String(req.params.id));
   if (!item) return res.status(404).json({ error: "Media not found" });
   const bytes = await readDecryptedMedia(item);
   if (!bytes) return res.status(404).json({ error: "Encrypted file is missing" });
   res.setHeader("Content-Type", item.mime);
   return res.send(bytes);
 });
+
 router.get("/media/:id/thumb", async (req, res) => {
-  const item = media.find((candidate) => candidate.id === req.params.id);
+  const item = media.find((candidate) => String(candidate.id) === String(req.params.id));
   if (!item) return res.status(404).json({ error: "Media not found" });
   const bytes = await readDecryptedThumbnail(item);
   if (!bytes) {
@@ -145,24 +148,51 @@ router.get("/media/:id/thumb", async (req, res) => {
   return res.type("image/webp").send(bytes);
 });
 
+router.delete("/media", async (_req, res) => {
+  const total = media.length;
+  const toRemove = [...media];
+  media.length = 0;
+  for (const item of toRemove) {
+    try {
+      await removeMediaFiles(item);
+    } catch {
+      // ignore missing physical files
+    }
+  }
+  for (const collection of collections) {
+    collection.mediaIds = [];
+    collection.itemCount = 0;
+    collection.coverThumbUrl = null;
+  }
+  saveState();
+  await flushState();
+  return res.json({ deleted: total, total });
+});
+
 router.delete("/media/:id", async (req, res) => {
-  const index = media.findIndex((item) => item.id === req.params.id);
+  const index = media.findIndex((item) => String(item.id) === String(req.params.id));
   if (index < 0) return res.status(404).json({ error: "Media not found" });
   const [removed] = media.splice(index, 1);
   if (removed) {
-    await removeMediaFiles(removed);
+    try {
+      await removeMediaFiles(removed);
+    } catch {
+      // ignore missing physical files
+    }
     for (const collection of collections) {
-      collection.mediaIds = collection.mediaIds.filter((id) => id !== removed.id);
+      if (!Array.isArray(collection.mediaIds)) collection.mediaIds = [];
+      collection.mediaIds = collection.mediaIds.filter((id) => String(id) !== String(removed.id));
       collection.itemCount = collection.mediaIds.length;
-      collection.coverThumbUrl = media.find((item) => collection.mediaIds.includes(item.id))?.thumbUrl ?? null;
+      collection.coverThumbUrl = media.find((item) => collection.mediaIds.some((id) => String(id) === String(item.id)))?.thumbUrl ?? null;
     }
   }
   saveState();
+  await flushState();
   return res.status(204).send();
 });
 
 router.post("/media/:id/favourite", (req, res) => {
-  const item = media.find((candidate) => candidate.id === req.params.id);
+  const item = media.find((candidate) => String(candidate.id) === String(req.params.id));
   if (!item) return res.status(404).json({ error: "Media not found" });
   item.favourite = !item.favourite;
   saveState();
@@ -170,47 +200,58 @@ router.post("/media/:id/favourite", (req, res) => {
 });
 
 router.post("/media/:id/tags", (req, res) => {
-  const item = media.find((candidate) => candidate.id === req.params.id);
+  const item = media.find((candidate) => String(candidate.id) === String(req.params.id));
   if (!item) return res.status(404).json({ error: "Media not found" });
-  const previousTags = item.tags;
+  const previousTags = Array.isArray(item.tags) ? item.tags : [];
   item.tags = Array.from(new Set((Array.isArray(req.body?.tags) ? req.body.tags : []).map((tag: unknown) => String(tag).trim().toLowerCase()).filter(Boolean)));
   for (const tag of previousTags.filter((value) => !item.tags.includes(value))) {
-    const collection = collections.find((entry) => entry.name.toLowerCase() === tag);
-    if (collection) collection.mediaIds = collection.mediaIds.filter((id) => id !== item.id);
+    const collection = collections.find((entry) => entry.name?.toLowerCase() === tag);
+    if (collection) {
+      if (!Array.isArray(collection.mediaIds)) collection.mediaIds = [];
+      collection.mediaIds = collection.mediaIds.filter((id) => String(id) !== String(item.id));
+      collection.itemCount = collection.mediaIds.length;
+    }
   }
   // Tags and collections are intentionally fused: each tag has a same-named collection.
   for (const tag of item.tags) {
-    let collection = collections.find((entry) => entry.name.toLowerCase() === tag);
-    if (!collection) { collection = { id: makeId("c"), name: tag, itemCount: 0, coverThumbUrl: null, mediaIds: [] }; collections.push(collection); }
-    if (!collection.mediaIds.includes(item.id)) collection.mediaIds.push(item.id);
+    let collection = collections.find((entry) => entry.name?.toLowerCase() === tag);
+    if (!collection) {
+      collection = { id: makeId("c"), name: tag, itemCount: 0, coverThumbUrl: null, mediaIds: [] };
+      collections.push(collection);
+    }
+    if (!Array.isArray(collection.mediaIds)) collection.mediaIds = [];
+    if (!collection.mediaIds.some((id) => String(id) === String(item.id))) collection.mediaIds.push(item.id);
+    collection.itemCount = collection.mediaIds.length;
   }
   for (const collection of collections) {
+    if (!Array.isArray(collection.mediaIds)) collection.mediaIds = [];
     collection.itemCount = collection.mediaIds.length;
-    collection.coverThumbUrl = media.find((entry) => collection.mediaIds.includes(entry.id))?.thumbUrl ?? null;
+    collection.coverThumbUrl = media.find((entry) => collection.mediaIds.some((id) => String(id) === String(entry.id)))?.thumbUrl ?? null;
   }
   saveState();
   return res.json(item);
 });
 
 router.delete("/media/:id/tags/:tag", (req, res) => {
-  const item = media.find((candidate) => candidate.id === req.params.id);
+  const item = media.find((candidate) => String(candidate.id) === String(req.params.id));
   if (!item) return res.status(404).json({ error: "Media not found" });
   const tag = String(req.params.tag).toLowerCase();
-  item.tags = item.tags.filter((value) => value.toLowerCase() !== tag);
-  const collection = collections.find((entry) => entry.name.toLowerCase() === tag);
+  item.tags = (Array.isArray(item.tags) ? item.tags : []).filter((value) => value.toLowerCase() !== tag);
+  const collection = collections.find((entry) => entry.name?.toLowerCase() === tag);
   if (collection) {
-    collection.mediaIds = collection.mediaIds.filter((id) => id !== item.id);
+    if (!Array.isArray(collection.mediaIds)) collection.mediaIds = [];
+    collection.mediaIds = collection.mediaIds.filter((id) => String(id) !== String(item.id));
     collection.itemCount = collection.mediaIds.length;
-    collection.coverThumbUrl = media.find((entry) => collection.mediaIds.includes(entry.id))?.thumbUrl ?? null;
+    collection.coverThumbUrl = media.find((entry) => collection.mediaIds.some((id) => String(id) === String(entry.id)))?.thumbUrl ?? null;
   }
   saveState();
   return res.json(item);
 });
 
 router.get("/tags", (_req, res) => {
-  const tags = new Set(media.flatMap((item) => item.tags));
+  const tags = new Set(media.flatMap((item) => (Array.isArray(item.tags) ? item.tags : [])));
   const result = Array.from(tags).sort((a, b) => a.localeCompare(b)).map((name) => {
-    const tagged = media.filter((item) => item.tags.includes(name));
+    const tagged = media.filter((item) => Array.isArray(item.tags) && item.tags.includes(name));
     const cover = tagged[0];
     return {
       name,
@@ -279,10 +320,10 @@ router.delete("/collections/:id", (req, res) => {
   return res.status(204).send();
 });
 router.post("/collections/:id/items", (req, res) => {
-  const collection = collections.find((entry) => entry.id === req.params.id);
-  const item = media.find((entry) => entry.id === req.body?.mediaId);
+  const collection = collections.find((entry) => String(entry.id) === String(req.params.id));
+  const item = media.find((entry) => String(entry.id) === String(req.body?.mediaId));
   if (!collection || !item) return res.status(404).json({ error: "Collection or media not found" });
-  if (!collection.mediaIds.includes(item.id)) collection.mediaIds.push(item.id);
+  if (!collection.mediaIds.some((id) => String(id) === String(item.id))) collection.mediaIds.push(item.id);
   if (!item.tags.includes(collection.name.toLowerCase())) item.tags.push(collection.name.toLowerCase());
   item.hideFromMain = Boolean(req.body?.hideFromMain);
   collection.itemCount = collection.mediaIds.length;
@@ -291,10 +332,10 @@ router.post("/collections/:id/items", (req, res) => {
   return res.json(collectionView(collection));
 });
 router.delete("/collections/:id/items/:mediaId", (req, res) => {
-  const collection = collections.find((entry) => entry.id === req.params.id);
-  const item = media.find((entry) => entry.id === req.params.mediaId);
+  const collection = collections.find((entry) => String(entry.id) === String(req.params.id));
+  const item = media.find((entry) => String(entry.id) === String(req.params.mediaId));
   if (!collection || !item) return res.status(404).json({ error: "Collection or media not found" });
-  collection.mediaIds = collection.mediaIds.filter((id) => id !== item.id);
+  collection.mediaIds = collection.mediaIds.filter((id) => String(id) !== String(item.id));
   collection.itemCount = collection.mediaIds.length;
   item.tags = item.tags.filter((tag) => tag.toLowerCase() !== collection.name.toLowerCase());
   item.hideFromMain = false;
@@ -467,6 +508,149 @@ router.get("/decrypt/jobs/:id/download", (req, res) => {
   const job = decryptJobs.get(req.params.id);
   if (!job || job.status !== "done" || !job.resultPath || !fs.existsSync(job.resultPath)) return res.status(404).json({ error: "Archive is not ready" });
   return res.download(job.resultPath, "uploader-pro-export.zip");
+});
+
+// ── pdf_converter Vault Import ─────────────────────────────────────────────
+// Accepts an `uploader_export.zip` produced by pdf_converter "Export to Vault".
+// Media lives in pics/<sha256>.enc (primary store) and Uploaded_Sessions/<session>/*.enc
+// (session copies); every entry is a Fernet token under pdf_converter's key.
+// Existing media with the same content OR the same name is overwritten in place,
+// never skipped. Files referenced by file_map.json but absent from the archive
+// are reported as "missing" instead of being counted as duplicates.
+
+const PDF_CONV_PASSWORD = "Ahmed//08112003..";
+const PDF_CONV_SALT = "antigravity_salt_123";
+const _pdfKey = crypto.pbkdf2Sync(PDF_CONV_PASSWORD, PDF_CONV_SALT, 100000, 32, "sha256");
+
+function decryptPdfFernet(enc: Buffer): Buffer {
+  const sk = _pdfKey.subarray(0, 16);
+  const ek = _pdfKey.subarray(16);
+  const raw: Buffer = enc[0] === 0x80 ? enc : Buffer.from(enc.toString("ascii").trim(), "base64url");
+  if (raw.length < 57 || raw[0] !== 0x80 || (raw.length - 57) % 16 !== 0) throw new Error("Bad Fernet token");
+  const body = raw.subarray(0, -32);
+  const sig = raw.subarray(-32);
+  if (!crypto.timingSafeEqual(crypto.createHmac("sha256", sk).update(body).digest(), sig)) throw new Error("HMAC fail");
+  // Fernet body layout: version(1) + timestamp(8) + IV(16) + ciphertext
+  const dec = crypto.createDecipheriv("aes-128-cbc", ek, body.subarray(9, 25));
+  return Buffer.concat([dec.update(body.subarray(25)), dec.final()]);
+}
+
+const importMultipart = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 * 1024 } });
+
+router.post("/import/vault", importMultipart.single("file"), async (req, res) => {
+  const file = req.file;
+  if (!file) return res.status(400).json({ error: "No file uploaded." });
+  let zip: AdmZip;
+  try { zip = new AdmZip(file.buffer); }
+  catch { return res.status(400).json({ error: "Cannot read ZIP." }); }
+
+  const readJ = <T>(p: string): T | null => {
+    const e = zip.getEntry(p); if (!e) return null;
+    try { return JSON.parse(e.getData().toString("utf8")) as T; } catch { return null; }
+  };
+
+  const fileMap   = readJ<Record<string,string>>("file_map.json") ?? {};
+  const tagsData  = readJ<Record<string,string[]>>("tags/tags.json") ?? {};
+  const favSet    = new Set(readJ<string[]>("favourites.json") ?? []);
+  const bkList    = readJ<string[]>("bookmarks.json") ?? [];
+  type PC = { name: string; items: Array<{ filename: string; hide_from_main?: boolean }> };
+  const pdfCols: PC[] = [];
+  for (const e of zip.getEntries()) {
+    if (!e.isDirectory && e.entryName.startsWith("collections/") && e.entryName.endsWith(".json")) {
+      try { const c = JSON.parse(e.getData().toString("utf8")) as PC; if (c?.name && Array.isArray(c.items)) pdfCols.push(c); } catch { /**/ }
+    }
+  }
+
+  // encFilename (e.g. "abc.enc") -> ZIP entry path inside Uploaded_Sessions/
+  const encMap = new Map<string,string>();
+  for (const e of zip.getEntries()) {
+    if (!e.isDirectory && e.entryName.startsWith("Uploaded_Sessions/") && e.entryName.endsWith(".enc"))
+      encMap.set(path.basename(e.entryName), e.entryName);
+  }
+
+  const MEXT = /\.(jpg|jpeg|png|webp|bmp|gif|jfif|heic|mp4|mov|webm)$/i;
+  let imported = 0, skipped = 0, failed = 0, decErr = 0;
+  const n2i = new Map<string, MediaItem>();
+
+  for (const [encFn, origName] of Object.entries(fileMap)) {
+    if (!MEXT.test(origName)) continue;
+    const ep = encMap.get(encFn);
+    if (!ep) { skipped++; continue; }
+    const ee = zip.getEntry(ep);
+    if (!ee) { failed++; continue; }
+
+    let plain: Buffer;
+    try { plain = decryptPdfFernet(ee.getData()); }
+    catch { decErr++; try { plain = ee.getData(); } catch { failed++; continue; } }
+
+    const sha256 = crypto.createHash("sha256").update(plain).digest("hex");
+    const dup = media.find(m => m.sha256 === sha256);
+    if (dup) { n2i.set(origName, dup); skipped++; continue; }
+
+    try {
+      const isVid = /\.(mp4|mov|webm)$/i.test(origName);
+      const item: MediaItem = {
+        id: makeId("m"), originalName: origName, type: isVid ? "video" : "image",
+        thumbUrl: "", fileUrl: "", mime: isVid ? "video/mp4" : "image/jpeg",
+        size: plain.length, favourite: favSet.has(origName),
+        tags: (tagsData[origName] ?? []).map(t => t.trim()).filter(Boolean),
+        hideFromMain: false, duplicate: false, lost: false,
+        createdAt: new Date().toISOString(), sha256,
+      };
+      let thumb: Buffer | undefined;
+      const te = zip.getEntry(`pics/${origName}`);
+      if (te) { thumb = te.getData(); }
+      else if (!isVid) {
+        try { thumb = await sharp(plain).rotate().resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true }).webp({ quality: 72 }).toBuffer(); }
+        catch { thumb = undefined; }
+      }
+      await writeEncryptedMedia(item, plain, thumb);
+      media.unshift(item); n2i.set(origName, item); imported++;
+    } catch { failed++; }
+  }
+
+  // Tags
+  for (const [on, tags] of Object.entries(tagsData)) {
+    const item = n2i.get(on) ?? media.find(m => m.originalName === on);
+    if (!item) continue;
+    item.tags = Array.from(new Set([...item.tags, ...tags.map(t => t.trim()).filter(Boolean)]));
+    for (const tag of item.tags) {
+      let col = collections.find(c => c.name.toLowerCase() === tag.toLowerCase());
+      if (!col) { col = { id: makeId("c"), name: tag, itemCount: 0, coverThumbUrl: null, mediaIds: [] }; collections.push(col); }
+      if (!col.mediaIds.includes(item.id)) col.mediaIds.push(item.id);
+      col.itemCount = col.mediaIds.length;
+      if (item.thumbUrl) col.coverThumbUrl = item.thumbUrl;
+    }
+  }
+
+  // Collections
+  let colsAdded = 0;
+  for (const pc of pdfCols) {
+    let col = collections.find(c => c.name.toLowerCase() === pc.name.toLowerCase());
+    if (!col) { col = { id: makeId("c"), name: pc.name, itemCount: 0, coverThumbUrl: null, mediaIds: [] }; collections.push(col); colsAdded++; }
+    for (const ci of pc.items) {
+      const item = n2i.get(ci.filename) ?? media.find(m => m.originalName === ci.filename);
+      if (!item) continue;
+      if (!col.mediaIds.includes(item.id)) col.mediaIds.push(item.id);
+      if (ci.hide_from_main) item.hideFromMain = true;
+      const tn = pc.name.toLowerCase();
+      if (!item.tags.includes(tn)) item.tags.push(tn);
+    }
+    col.itemCount = col.mediaIds.length;
+    const cover = media.find(m => col!.mediaIds.includes(m.id));
+    if (cover?.thumbUrl) col.coverThumbUrl = cover.thumbUrl;
+  }
+
+  // Bookmarks
+  let bkAdded = 0;
+  for (const url of bkList) {
+    if (!url || bookmarks.some(b => b.url === url)) continue;
+    bookmarks.push({ id: makeId("b"), url, order: bookmarks.length }); bkAdded++;
+  }
+
+  saveState(); await flushState();
+  return res.json({ ok: true, imported, skipped, failed, decryptErrors: decErr, collectionsImported: colsAdded, bookmarksImported: bkAdded,
+    message: `Imported ${imported} media (${skipped} already present, ${failed} failed, ${decErr} decrypt errors). ${colsAdded} collections and ${bkAdded} bookmarks added.` });
 });
 
 export default router;

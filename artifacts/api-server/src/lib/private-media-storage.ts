@@ -62,9 +62,14 @@ export async function readEncryptedObject(objectPath: string) {
 }
 
 export async function deleteEncryptedObject(objectPath: string) {
-  if (objectPath.startsWith("/objects/")) {
-    await getObjectFile(objectPath).delete({ ignoreNotFound: true });
-    return;
+  try {
+    if (objectPath.startsWith("/objects/")) {
+      await getObjectFile(objectPath).delete({ ignoreNotFound: true });
+      return;
+    }
+    await fs.rm(objectPath, { force: true });
+  } catch {
+    // ignore missing files or unconfigured private storage
   }
-  await fs.rm(objectPath, { force: true });
 }
+
