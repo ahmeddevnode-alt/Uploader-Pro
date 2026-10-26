@@ -157,7 +157,7 @@ export function encryptedMediaPath(item: MediaItem) {
   return item.encPath ? path.resolve(item.encPath) : path.join(mediaDir, `${item.sha256 ?? item.id}.enc`);
 }
 
-export async function writeEncryptedMedia(item: MediaItem, bytes: Buffer, thumbnail?: Buffer) {
+export async function writeEncryptedMedia(item: MediaItem, bytes: Buffer, thumbnail?: Buffer, skipSave = false) {
   const target = path.join(mediaDir, `${item.sha256}.enc`);
   item.encPath = await storeEncryptedObject(encryptFernet(bytes), target);
   if (thumbnail) {
@@ -166,7 +166,19 @@ export async function writeEncryptedMedia(item: MediaItem, bytes: Buffer, thumbn
   }
   item.fileUrl = `/api/media/${item.id}/file`;
   item.thumbUrl = `/api/media/${item.id}/thumb`;
-  saveState();
+  if (!skipSave) saveState();
+}
+
+export async function writePreEncryptedMedia(item: MediaItem, encToken: Buffer, thumbnail?: Buffer, skipSave = false) {
+  const target = path.join(mediaDir, `${item.sha256}.enc`);
+  item.encPath = await storeEncryptedObject(encToken, target);
+  if (thumbnail) {
+    const thumbTarget = path.join(mediaDir, "thumbs", `${item.sha256}.enc`);
+    item.thumbEncPath = await storeEncryptedObject(encryptFernet(thumbnail), thumbTarget);
+  }
+  item.fileUrl = `/api/media/${item.id}/file`;
+  item.thumbUrl = `/api/media/${item.id}/thumb`;
+  if (!skipSave) saveState();
 }
 
 export async function readDecryptedMedia(item: MediaItem) {

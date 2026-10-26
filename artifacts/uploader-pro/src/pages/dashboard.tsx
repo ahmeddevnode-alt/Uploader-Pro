@@ -353,7 +353,10 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
+<<<<<<< Updated upstream
         </div>
+=======
+>>>>>>> Stashed changes
       </section>
     </div>
   );
@@ -481,15 +484,27 @@ function ImportVaultDialog({
       const formData = new FormData();
       formData.append("file", file);
 
+      let timer: ReturnType<typeof setInterval> | null = null;
+
       // Use XHR for upload progress
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("POST", "/api/import/vault");
         if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
         xhr.upload.addEventListener("progress", (e) => {
-          if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 85));
+          if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 85);
+            setProgress(pct);
+            if (pct >= 85 && !timer) {
+              // Smoothly inch forward to 95% while server is processing
+              timer = setInterval(() => {
+                setProgress((p) => (p < 95 ? p + 1 : p));
+              }, 600);
+            }
+          }
         });
         xhr.addEventListener("load", () => {
+          if (timer) clearInterval(timer);
           setProgress(100);
           if (xhr.status >= 200 && xhr.status < 300) {
             try {
@@ -507,7 +522,10 @@ function ImportVaultDialog({
             reject(new Error(msg));
           }
         });
-        xhr.addEventListener("error", () => reject(new Error("Network error — check your connection.")));
+        xhr.addEventListener("error", () => {
+          if (timer) clearInterval(timer);
+          reject(new Error("Network error — check your connection."));
+        });
         xhr.send(formData);
       });
     } catch (err) {
@@ -623,7 +641,7 @@ function ImportVaultDialog({
           <div className="mt-5 space-y-3">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 size={14} className="animate-spin text-primary" />
-              <span>{progress < 86 ? "Uploading & processing…" : "Encrypting and saving media…"}</span>
+              <span>{progress < 85 ? `Uploading archive (${progress}%)…` : "Extracting and importing vault data…"}</span>
               <span className="ml-auto font-mono text-foreground">{progress}%</span>
             </div>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">

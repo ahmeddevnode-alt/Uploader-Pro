@@ -16,7 +16,25 @@ export function MediaPage({ view, title, description }: { view: ListMediaParams[
   const query = useListMedia({ view, limit: 100, type: typeParam }, { query: { queryKey: getListMediaQueryKey({ view, limit: 100, type: typeParam }), refetchInterval: view === 'new' ? 10000 : false, refetchOnWindowFocus: true } });
   const imageCount = useListMedia({ view, type: 'image', limit: 1 });
   const videoCount = useListMedia({ view, type: 'video', limit: 1 });
-  const items = useMemo(() => { const list = [...(query.data?.items || [])].filter((media) => !media.hideFromMain && media.originalName.toLowerCase().includes(search.toLowerCase())); return list.sort((a, b) => sort === 'name' ? a.originalName.localeCompare(b.originalName) : sort === 'oldest' ? +new Date(a.createdAt) - +new Date(b.createdAt) : +new Date(b.createdAt) - +new Date(a.createdAt)); }, [query.data?.items, search, sort]);
+  const items = useMemo(() => {
+    const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const list = [...(query.data?.items || [])].filter((media) => {
+      if (media.hideFromMain) return false;
+      if (!words.length) return true;
+      return words.every(
+        (word) =>
+          media.tags.some((tag) => tag.toLowerCase().includes(word)) ||
+          media.originalName.toLowerCase().includes(word),
+      );
+    });
+    return list.sort((a, b) =>
+      sort === 'name'
+        ? a.originalName.localeCompare(b.originalName)
+        : sort === 'oldest'
+        ? +new Date(a.createdAt) - +new Date(b.createdAt)
+        : +new Date(b.createdAt) - +new Date(a.createdAt),
+    );
+  }, [query.data?.items, search, sort]);
   return <div className="mx-auto max-w-[1440px]"><PageHeading eyebrow={view === 'new' ? 'Incoming frames' : view === 'favourites' ? 'Marked moments' : view === 'untagged' ? 'Needs context' : 'The full archive'} title={title} description={description} action={<div className="flex flex-wrap gap-2">{view !== 'new' ? <Link href="/new" className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-xs font-extrabold hover:border-primary/50 hover:text-primary" data-testid="link-add-from-media"><UploadCloud size={15} /> Add media</Link> : null}<BulkDownloadButton view={view} type={typeParam} search={search} /></div>} /><MediaTypeTabs type={type} setType={setType} images={imageCount.data?.total ?? 0} videos={videoCount.data?.total ?? 0} /><MediaToolbar count={query.data?.total ?? items.length} onSearch={setSearch} filter={sort} setFilter={setSort} />{query.isLoading ? <MediaSkeleton /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : <MediaGrid items={items} emptyTitle={view === 'untagged' ? 'Everything has context' : 'No media found'} emptyCopy={search ? 'Try a different name or clear your filter.' : 'Import a few frames to make this view yours.'} />}</div>;
 }
 

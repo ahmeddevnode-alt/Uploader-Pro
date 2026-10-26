@@ -64,6 +64,15 @@ const formatDate = (date: string) =>
     year: "numeric",
   }).format(new Date(date));
 
+/** Distribute items into N columns in a stable, order-preserving way */
+function distributeColumns(items: Media[], cols: number): Media[][] {
+  const columns: Media[][] = Array.from({ length: cols }, () => []);
+  items.forEach((item, i) => {
+    columns[i % cols]!.push(item);
+  });
+  return columns;
+}
+
 export function MediaGrid({
   items,
   emptyTitle = "Nothing here yet",
@@ -86,12 +95,56 @@ export function MediaGrid({
       </div>
     );
 
+  // Stable column distribution: item at index i always goes to column (i % cols).
+  // We render using responsive CSS classes that mirror the column count.
+  const cols2 = distributeColumns(items, 2);
+  const cols3 = distributeColumns(items, 3);
+  const cols4 = distributeColumns(items, 4);
+  const cols5 = distributeColumns(items, 5);
+
   return (
-    <div className="columns-2 gap-3 sm:columns-3 lg:columns-4 xl:columns-5">
-      {items.map((media, index) => (
-        <MediaTile key={media.id} media={media} index={index} />
-      ))}
-    </div>
+    <>
+      {/* 2-col layout: always rendered, hidden on sm+ */}
+      <div className="flex gap-3 sm:hidden">
+        {cols2.map((col, ci) => (
+          <div key={ci} className="flex flex-1 flex-col gap-3">
+            {col.map((media, idx) => (
+              <MediaTile key={media.id} media={media} index={ci + idx * 2} />
+            ))}
+          </div>
+        ))}
+      </div>
+      {/* 3-col layout: sm only */}
+      <div className="hidden sm:flex lg:hidden gap-3">
+        {cols3.map((col, ci) => (
+          <div key={ci} className="flex flex-1 flex-col gap-3">
+            {col.map((media, idx) => (
+              <MediaTile key={media.id} media={media} index={ci + idx * 3} />
+            ))}
+          </div>
+        ))}
+      </div>
+      {/* 4-col layout: lg only */}
+      <div className="hidden lg:flex xl:hidden gap-3">
+        {cols4.map((col, ci) => (
+          <div key={ci} className="flex flex-1 flex-col gap-3">
+            {col.map((media, idx) => (
+              <MediaTile key={media.id} media={media} index={ci + idx * 4} />
+            ))}
+          </div>
+        ))}
+      </div>
+      {/* 5-col layout: xl+ */}
+      <div className="hidden xl:flex gap-3">
+        {cols5.map((col, ci) => (
+          <div key={ci} className="flex flex-1 flex-col gap-3">
+            {col.map((media, idx) => (
+              <MediaTile key={media.id} media={media} index={ci + idx * 5} />
+            ))}
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -415,7 +468,7 @@ function MediaTile({ media, index }: { media: Media; index: number }) {
   return (
     <>
       <article
-        className="media-tile vault-in group relative mb-3 break-inside-avoid overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm"
+        className="media-tile vault-in group relative overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm"
         style={{ animationDelay: `${Math.min(index, 10) * 35}ms` }}
         data-testid={`card-media-${media.id}`}
       >
@@ -478,7 +531,7 @@ function MediaTile({ media, index }: { media: Media; index: number }) {
             </button>
           )}
 
-          <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-background/75 via-transparent to-background/10 opacity-0 transition-opacity group-hover:opacity-100" />
+          <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-background/75 via-transparent to-background/10 opacity-0 transition-opacity group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100" />
 
           {/* Badges */}
           <div className="absolute left-2.5 top-2.5 flex gap-1.5 pointer-events-none">
@@ -518,7 +571,7 @@ function MediaTile({ media, index }: { media: Media; index: number }) {
             className={`absolute right-2.5 top-2.5 grid h-8 w-8 place-items-center rounded-full backdrop-blur transition-all ${
               media.favourite
                 ? "bg-primary text-primary-foreground"
-                : "bg-background/65 text-foreground opacity-0 group-hover:opacity-100"
+                : "bg-background/65 text-foreground opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
             }`}
             aria-label={
               media.favourite ? "Remove from favourites" : "Add to favourites"
@@ -540,7 +593,7 @@ function MediaTile({ media, index }: { media: Media; index: number }) {
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="grid h-7 w-7 place-items-center rounded-lg bg-background/80 text-foreground opacity-0 backdrop-blur transition-opacity group-hover:opacity-100 hover:bg-background shadow"
+                  className="grid h-7 w-7 place-items-center rounded-lg bg-background/80 text-foreground opacity-100 sm:opacity-0 backdrop-blur transition-opacity sm:group-hover:opacity-100 hover:bg-background shadow"
                   aria-label="Media actions"
                   data-testid={`button-media-menu-${media.id}`}
                 >

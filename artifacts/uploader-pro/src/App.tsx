@@ -9,6 +9,7 @@ import LoginPage from '@/pages/login';
 import DashboardPage from '@/pages/dashboard';
 import { MediaPage, NewUploadsPage } from '@/pages/media-pages';
 import CollectionsPage from '@/pages/collections';
+import CollectionDetailPage from '@/pages/collection-detail';
 import DuplicatesPage from '@/pages/duplicates';
 import BookmarksPage from '@/pages/bookmarks';
 import MasterCollectionsPage from '@/pages/master-collections';
@@ -33,6 +34,7 @@ function Router() {
         <Route path="/favourites"><UploaderShell><MediaPage view="favourites" title="The ones worth returning to." description="A small constellation of moments you chose to keep close." /></UploaderShell></Route>
         <Route path="/untagged"><UploaderShell><MediaPage view="untagged" title="Add the missing context." description="A few words can turn a file into a memory. These frames are ready for them." /></UploaderShell></Route>
         <Route path="/collections"><UploaderShell><CollectionsPage /></UploaderShell></Route>
+        <Route path="/collections/:id"><UploaderShell><CollectionDetailPage /></UploaderShell></Route>
         <Route path="/master-collections"><UploaderShell><MasterCollectionsPage /></UploaderShell></Route>
         <Route path="/duplicates"><UploaderShell><DuplicatesPage /></UploaderShell></Route>
         <Route path="/bookmarks"><UploaderShell><BookmarksPage /></UploaderShell></Route>
