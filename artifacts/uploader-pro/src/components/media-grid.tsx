@@ -51,6 +51,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { LayoutSwitcher } from "@/components/layout-preferences";
+import type { LayoutMode } from "@/components/layout-preferences";
 
 const formatSize = (size: number) =>
   size > 1_000_000_000
@@ -77,10 +79,12 @@ export function MediaGrid({
   items,
   emptyTitle = "Nothing here yet",
   emptyCopy = "When media arrives, it will settle into this view.",
+  layout = "comfortable",
 }: {
   items: Media[];
   emptyTitle?: string;
   emptyCopy?: string;
+  layout?: LayoutMode;
 }) {
   if (!items.length)
     return (
@@ -95,26 +99,55 @@ export function MediaGrid({
       </div>
     );
 
-  // Stable column distribution: item at index i always goes to column (i % cols).
-  // We render using responsive CSS classes that mirror the column count.
-  const cols2 = distributeColumns(items, 2);
+  // List: single column of compact rows. Comfortable on phones, scannable on desktop.
+  if (layout === "list") {
+    return (
+      <div className="flex flex-col gap-2 sm:gap-3">
+        {items.map((media, idx) => (
+          <MediaTile key={media.id} media={media} index={idx} layout="list" />
+        ))}
+      </div>
+    );
+  }
+
+  // Compact: dense square thumbnails.
+  if (layout === "compact") {
+    return (
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+        {items.map((media, idx) => (
+          <MediaTile key={media.id} media={media} index={idx} layout="compact" />
+        ))}
+      </div>
+    );
+  }
+
+  // Details: large cards with full metadata.
+  if (layout === "details") {
+    return (
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {items.map((media, idx) => (
+          <MediaTile key={media.id} media={media} index={idx} layout="details" />
+        ))}
+      </div>
+    );
+  }
+
+  // Comfortable (default): responsive masonry. One column on phones keeps the
+  // rich card legible (fixes the cramped 2-col "desktop on mobile" look); the
+  // 3/4/5 column tiers handle tablets and desktops.
   const cols3 = distributeColumns(items, 3);
   const cols4 = distributeColumns(items, 4);
   const cols5 = distributeColumns(items, 5);
 
   return (
     <>
-      {/* 2-col layout: always rendered, hidden on sm+ */}
-      <div className="flex gap-3 sm:hidden">
-        {cols2.map((col, ci) => (
-          <div key={ci} className="flex flex-1 flex-col gap-3">
-            {col.map((media, idx) => (
-              <MediaTile key={media.id} media={media} index={ci + idx * 2} />
-            ))}
-          </div>
+      {/* 1-col layout: phones only */}
+      <div className="flex flex-col gap-3 sm:hidden">
+        {items.map((media, idx) => (
+          <MediaTile key={media.id} media={media} index={idx} />
         ))}
       </div>
-      {/* 3-col layout: sm only */}
+      {/* 3-col layout: sm–lg */}
       <div className="hidden sm:flex lg:hidden gap-3">
         {cols3.map((col, ci) => (
           <div key={ci} className="flex flex-1 flex-col gap-3">
@@ -124,7 +157,7 @@ export function MediaGrid({
           </div>
         ))}
       </div>
-      {/* 4-col layout: lg only */}
+      {/* 4-col layout: lg–xl */}
       <div className="hidden lg:flex xl:hidden gap-3">
         {cols4.map((col, ci) => (
           <div key={ci} className="flex flex-1 flex-col gap-3">
@@ -427,7 +460,10 @@ function TagEditorModal({
   );
 }
 
-function MediaTile({ media, index }: { media: Media; index: number }) {
+function MediaTile({ media, index, layout = "comfortable" }: { media: Media; index: number; layout?: LayoutMode }) {
+  const isList = layout === "list";
+  const isCompact = layout === "compact";
+  const isDetails = layout === "details";
   const [tagModalOpen, setTagModalOpen] = useState(false);
   const [lightbox, setLightbox] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -467,6 +503,145 @@ function MediaTile({ media, index }: { media: Media; index: number }) {
 
   return (
     <>
+      {isList ? (
+        <article
+          className="media-tile vault-in group relative flex items-stretch overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm"
+          style={{ animationDelay: `${Math.min(index, 10) * 35}ms` }}
+          data-testid={`card-media-${media.id}`}
+        >
+          <div className="relative h-16 w-16 shrink-0 overflow-hidden bg-secondary sm:h-20 sm:w-20">
+            <button
+              disabled={media.lost}
+              onClick={() => setLightbox(true)}
+              className="block h-full w-full disabled:cursor-not-allowed"
+              aria-label={`Open ${media.originalName}`}
+            >
+              {media.type === "video" ? (
+                <video
+                  src={media.fileUrl}
+                  poster={media.thumbUrl || undefined}
+                  muted
+                  loop
+                  playsInline
+                  preload="none"
+                  className={`h-full w-full object-cover ${media.lost ? "opacity-50 grayscale" : ""}`}
+                />
+              ) : media.thumbUrl ? (
+                <img
+                  src={media.thumbUrl}
+                  alt={media.originalName}
+                  className={`h-full w-full object-cover ${media.lost ? "opacity-50 grayscale" : ""}`}
+                  loading="lazy"
+                />
+              ) : (
+                <span className="grid h-full w-full place-items-center text-muted-foreground">
+                  <Film size={20} />
+                </span>
+              )}
+            </button>
+            {media.type === "video" && (
+              <span className="absolute bottom-1 left-1 grid h-5 w-5 place-items-center rounded bg-background/75 text-foreground backdrop-blur">
+                <Play size={10} fill="currentColor" />
+              </span>
+            )}
+            {media.lost && (
+              <span className="absolute left-1 top-1 rounded bg-destructive px-1 py-0.5 font-mono text-[8px] font-bold text-white">
+                LOST
+              </span>
+            )}
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col justify-center p-3">
+            <div className="flex items-start justify-between gap-2">
+              <p
+                className="truncate text-xs font-bold text-foreground sm:text-sm"
+                title={media.originalName}
+                data-testid={`text-media-name-${media.id}`}
+              >
+                {media.originalName}
+              </p>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  onClick={() =>
+                    toggleFavourite.mutate({ id: media.id }, { onSuccess: updateAll })
+                  }
+                  className={`grid h-7 w-7 place-items-center rounded-full backdrop-blur transition-all ${
+                    media.favourite
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-background/65 text-foreground hover:bg-secondary"
+                  }`}
+                  aria-label={media.favourite ? "Remove from favourites" : "Add to favourites"}
+                  data-testid={`button-favourite-${media.id}`}
+                >
+                  <Heart size={14} fill={media.favourite ? "currentColor" : "none"} />
+                </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="grid h-7 w-7 place-items-center rounded-full bg-background/65 text-foreground hover:bg-secondary"
+                      aria-label="Media actions"
+                      data-testid={`button-media-menu-${media.id}`}
+                    >
+                      <MoreHorizontal size={14} />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-44 z-50">
+                    <DropdownMenuItem
+                      onClick={() => setTagModalOpen(true)}
+                      className="flex items-center gap-2 cursor-pointer text-xs"
+                      data-testid={`button-tag-media-${media.id}`}
+                    >
+                      <Tag size={13} className="text-muted-foreground" />
+                      Edit tags
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      asChild
+                      className="flex items-center gap-2 cursor-pointer text-xs"
+                    >
+                      <a href={media.fileUrl} download={media.originalName}>
+                        <ArrowDownToLine size={13} className="text-muted-foreground" />
+                        Download
+                      </a>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setConfirmDelete(true)}
+                      className="flex items-center gap-2 cursor-pointer text-xs text-destructive focus:bg-destructive/10 focus:text-destructive"
+                      data-testid={`button-delete-media-${media.id}`}
+                    >
+                      <Trash2 size={13} />
+                      Delete media
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 font-mono text-[10px] text-muted-foreground">
+              <span>{formatSize(media.size)}</span>
+              <span aria-hidden="true">·</span>
+              <span>{formatDate(media.createdAt)}</span>
+            </div>
+            {media.tags.length ? (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {media.tags.slice(0, 4).map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-md bg-accent/10 px-1.5 py-0.5 text-[9px] font-semibold text-accent"
+                  >
+                    {tag}
+                  </span>
+                ))}
+                {media.tags.length > 4 ? (
+                  <span className="text-[9px] text-muted-foreground">
+                    +{media.tags.length - 4}
+                  </span>
+                ) : null}
+              </div>
+            ) : (
+              <p className="mt-1.5 text-[10px] italic text-muted-foreground/60">No tags</p>
+            )}
+          </div>
+        </article>
+      ) : (
       <article
         className="media-tile vault-in group relative overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm"
         style={{ animationDelay: `${Math.min(index, 10) * 35}ms` }}
@@ -500,7 +675,7 @@ function MediaTile({ media, index }: { media: Media; index: number }) {
                 loop
                 playsInline
                 preload="none"
-                className={`aspect-[4/3] max-h-[420px] w-full object-cover ${
+                className={`${isCompact ? "aspect-square" : "aspect-[4/3]"} ${isDetails ? "max-h-[560px]" : "max-h-[420px]"} w-full object-cover ${
                   media.lost ? "opacity-50 grayscale" : ""
                 }`}
               />
@@ -515,7 +690,7 @@ function MediaTile({ media, index }: { media: Media; index: number }) {
               <img
                 src={media.thumbUrl}
                 alt={media.originalName}
-                className={`h-auto max-h-[420px] w-full object-cover ${
+                className={`${isCompact ? "aspect-square" : "h-auto"} ${isDetails ? "max-h-[560px]" : "max-h-[420px]"} w-full object-cover ${
                   media.lost ? "opacity-50 grayscale" : ""
                 }`}
                 loading="lazy"
@@ -631,7 +806,7 @@ function MediaTile({ media, index }: { media: Media; index: number }) {
           </div>
         </div>
 
-        <div className="p-3">
+        <div className={isCompact ? "p-2" : "p-3"}>
           <div className="flex items-start justify-between gap-2">
             <p
               className="truncate text-xs font-bold text-foreground"
@@ -644,27 +819,32 @@ function MediaTile({ media, index }: { media: Media; index: number }) {
               {formatSize(media.size)}
             </span>
           </div>
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            {formatDate(media.createdAt)}
-          </p>
-          {media.tags.length ? (
-            <div className="mt-2 flex gap-1 overflow-hidden">
-              {media.tags.slice(0, 2).map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded-md bg-accent/10 px-1.5 py-0.5 text-[9px] font-semibold text-accent"
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
-          ) : (
-            <p className="mt-2 text-[10px] italic text-muted-foreground/60">
-              No tags
-            </p>
+          {isCompact ? null : (
+            <>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                {formatDate(media.createdAt)}
+              </p>
+              {media.tags.length ? (
+                <div className="mt-2 flex flex-wrap gap-1 overflow-hidden">
+                  {(isDetails ? media.tags : media.tags.slice(0, 2)).map((tag) => (
+                    <span
+                      key={tag}
+                      className="rounded-md bg-accent/10 px-1.5 py-0.5 text-[9px] font-semibold text-accent"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-[10px] italic text-muted-foreground/60">
+                  No tags
+                </p>
+              )}
+            </>
           )}
         </div>
       </article>
+      )}
 
       {/* Edit Tags Modal */}
       <TagEditorModal
@@ -802,18 +982,25 @@ export function MediaToolbar({
   onSearch,
   filter,
   setFilter,
+  layout = "comfortable",
+  onLayoutChange,
 }: {
   count: number;
   onSearch?: (value: string) => void;
   filter?: string;
   setFilter?: (value: string) => void;
+  layout?: LayoutMode;
+  onLayoutChange?: (mode: LayoutMode) => void;
 }) {
   return (
     <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
         <span className="text-foreground">{count}</span> items secured
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {onLayoutChange ? (
+          <LayoutSwitcher layout={layout} onChange={onLayoutChange} />
+        ) : null}
         {onSearch ? (
           <input
             onChange={(e) => onSearch(e.target.value)}

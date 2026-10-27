@@ -547,17 +547,12 @@ function decryptPdfFernet(enc: Buffer): Buffer {
 
 const importUploadDir = path.join(os.tmpdir(), "uploader-pro-imports");
 try { fs.mkdirSync(importUploadDir, { recursive: true }); } catch { /* ignore */ }
-const importMultipart = multer({
-  dest: importUploadDir,
-  limits: { fileSize: 2 * 1024 * 1024 * 1024 }
-});
+const importMultipart = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 * 1024 } });
 
 router.post("/import/vault", importMultipart.single("file"), async (req, res) => {
   const file = req.file;
   if (!file) return res.status(400).json({ error: "No file uploaded." });
-
   let zip: AdmZip;
-<<<<<<< Updated upstream
   try { zip = new AdmZip(file.buffer); }
   catch { return res.status(400).json({ error: "Cannot read ZIP." }); }
 
@@ -567,10 +562,9 @@ router.post("/import/vault", importMultipart.single("file"), async (req, res) =>
   };
 
   const fileMap   = readJ<Record<string,string>>("file_map.json") ?? {};
-  const tagsRaw   = readJ<Record<string, unknown>>("tags/tags.json") ?? {};
+  const tagsData  = readJ<Record<string,string[]>>("tags/tags.json") ?? {};
   const favSet    = new Set(readJ<string[]>("favourites.json") ?? []);
-  const bkListRaw = readJ<unknown[]>("bookmarks.json") ?? [];
-  const masterRaw = readJ<Array<{ name?: string; collection_ids?: string[] }>>("collections/master_collections.json") ?? [];
+  const bkList    = readJ<string[]>("bookmarks.json") ?? [];
   type PC = { name: string; items: Array<{ filename: string; hide_from_main?: boolean }> };
   const pdfCols: PC[] = [];
   for (const e of zip.getEntries()) {
@@ -579,70 +573,34 @@ router.post("/import/vault", importMultipart.single("file"), async (req, res) =>
     }
   }
 
-  // Resolve a file_map key (e.g. "<hash>.enc" or "<hash>") to its original filename.
-  const resolveName = (key: string): string | undefined => {
-    if (fileMap[key]) return fileMap[key];
-    if (key.endsWith(".enc") && fileMap[key.slice(0, -4)]) return fileMap[key.slice(0, -4)];
-    return undefined;
-  };
-
-  // Collect every encrypted media entry from both the primary pics/ store and session copies.
-  // Key by the legacy hash (basename without .enc) so multiple copies resolve to one item.
-  type EncEntry = { zipPath: string; hash: string };
-  const encByHash = new Map<string, EncEntry>();
+  // encFilename (e.g. "<sha256>.enc") -> ZIP entry path.
+  // pics/<sha256>.enc is the PRIMARY store and contains ALL unique media;
+  // Uploaded_Sessions/<session>/<sha256>.enc holds session copies (a subset
+  // of pics/ by basename). Build the lookup from pics/ first, then fill any
+  // gaps from Uploaded_Sessions/. The previous version only read sessions,
+  // which capped imports at the session copy count instead of the full set.
+  const encMap = new Map<string,string>();
   for (const e of zip.getEntries()) {
-    if (e.isDirectory || !e.entryName.endsWith(".enc")) continue;
-    const underPics = e.entryName.startsWith("pics/");
-    const underSessions = e.entryName.startsWith("Uploaded_Sessions/");
-    if (!underPics && !underSessions) continue;
-    const base = path.basename(e.entryName, ".enc");
-    if (!encByHash.has(base)) encByHash.set(base, { zipPath: e.entryName, hash: base });
-  }
-
-  // Build a per-filename tag list that supports both the new {filename: [tags]} shape
-  // and the legacy {tags: {tag: [filenames]}, file_tags: {filename: [tags]}} shape.
-  type TagIndex = Map<string, Set<string>>;
-  const buildTagIndex = (): TagIndex => {
-    const idx: TagIndex = new Map();
-    const add = (file: string, tag: string) => {
-      const clean = tag.trim().toLowerCase();
-      if (!clean) return;
-      const key = path.basename(String(file));
-      const set = idx.get(key) ?? new Set<string>();
-      set.add(clean); idx.set(key, set);
-    };
-    const directTags = tagsRaw as Record<string, string[]>;
-    if (Array.isArray(directTags)) {
-      // unexpected shape; ignore
-    } else if (directTags && typeof directTags === "object") {
-      const maybeFileTags = directTags.file_tags as Record<string, string[]> | undefined;
-      const maybeTags = directTags.tags as Record<string, string[]> | undefined;
-      if (maybeFileTags) {
-        for (const [file, tags] of Object.entries(maybeFileTags)) for (const tag of Array.isArray(tags) ? tags : []) add(file, String(tag));
-      }
-      if (maybeTags) {
-        for (const [tag, files] of Object.entries(maybeTags)) for (const file of Array.isArray(files) ? files : []) add(String(file), tag);
-      }
-      // Also accept the flat {filename: [tags]} shape used by newer exports.
-      for (const [file, tags] of Object.entries(directTags)) {
-        if (file === "tags" || file === "file_tags") continue;
-        if (Array.isArray(tags)) for (const tag of tags) add(file, String(tag));
-      }
+    if (e.isDirectory) continue;
+    if (e.entryName.startsWith("pics/") && e.entryName.endsWith(".enc")) {
+      encMap.set(path.basename(e.entryName), e.entryName);
+      continue;
     }
-    return idx;
-  };
-  const tagIndex = buildTagIndex();
-
-  const bookmarks = (bkListRaw ?? []).map((entry) => (typeof entry === "string" ? entry : String((entry as { url?: string })?.url ?? ""))).filter(Boolean);
+    if (e.entryName.startsWith("Uploaded_Sessions/") && e.entryName.endsWith(".enc")) {
+      const base = path.basename(e.entryName);
+      if (!encMap.has(base)) encMap.set(base, e.entryName);
+    }
+  }
 
   const MEXT = /\.(jpg|jpeg|png|webp|bmp|gif|jfif|heic|mp4|mov|webm)$/i;
   let imported = 0, skipped = 0, failed = 0, decErr = 0;
   const n2i = new Map<string, MediaItem>();
 
-  for (const [hash, { zipPath }] of encByHash) {
-    const origName = resolveName(`${hash}.enc`) ?? resolveName(hash) ?? fileMap[`${hash}.enc`] ?? fileMap[hash];
-    if (!origName || !MEXT.test(origName)) { skipped++; continue; }
-    const ee = zip.getEntry(zipPath);
+  for (const [encFn, origName] of Object.entries(fileMap)) {
+    if (!MEXT.test(origName)) continue;
+    const ep = encMap.get(encFn);
+    if (!ep) { skipped++; continue; }
+    const ee = zip.getEntry(ep);
     if (!ee) { failed++; continue; }
 
     let plain: Buffer;
@@ -669,10 +627,10 @@ router.post("/import/vault", importMultipart.single("file"), async (req, res) =>
       }
       item.size = plain.length;
       item.favourite = favSet.has(origName);
-      const wantTags = tagIndex.get(origName);
-      if (wantTags) item.tags = Array.from(new Set([...item.tags, ...Array.from(wantTags)]));
+      const wantTags = (tagsData[origName] ?? []).map(t => t.trim()).filter(Boolean);
+      item.tags = Array.from(new Set([...item.tags, ...wantTags]));
       let thumb: Buffer | undefined;
-      const te = zip.getEntry(`pics/${origName}`) ?? zip.getEntry(`pics/${hash}.enc`);
+      const te = zip.getEntry(`pics/${origName}`);
       if (te) {
         try { thumb = decryptPdfFernet(te.getData()); }
         catch { thumb = undefined; }
@@ -687,266 +645,25 @@ router.post("/import/vault", importMultipart.single("file"), async (req, res) =>
     } catch { failed++; }
   }
 
-  // Tags: ensure every tag has a matching collection
-  const ensureTagCollection = (tag: string) => {
-    const lower = tag.toLowerCase();
-    let col = collections.find(c => c.name.toLowerCase() === lower);
-    if (!col) { col = { id: makeId("c"), name: tag, itemCount: 0, coverThumbUrl: null, mediaIds: [] }; collections.push(col); }
-    return col;
-  };
-  for (const item of media) {
+  // Tags
+  for (const [on, tags] of Object.entries(tagsData)) {
+    const item = n2i.get(on) ?? media.find(m => m.originalName === on);
+    if (!item) continue;
+    item.tags = Array.from(new Set([...item.tags, ...tags.map(t => t.trim()).filter(Boolean)]));
     for (const tag of item.tags) {
-      const col = ensureTagCollection(tag);
-      if (!col.mediaIds.includes(item.id)) col.mediaIds.push(item.id);
-=======
-  try {
-    zip = file.path ? new AdmZip(file.path) : new AdmZip(file.buffer);
-  } catch {
-    if (file.path) { try { fs.unlinkSync(file.path); } catch { /* ignore */ } }
-    return res.status(400).json({ error: "Cannot read ZIP archive." });
-  }
-
-  try {
-    const readJ = <T>(p: string): T | null => {
-      const e = zip.getEntry(p); if (!e) return null;
-      try { return JSON.parse(e.getData().toString("utf8")) as T; } catch { return null; }
-    };
-
-    const fileMap   = readJ<Record<string,string>>("file_map.json") ?? {};
-    const tagsRaw   = readJ<Record<string, unknown>>("tags/tags.json") ?? {};
-    const favSet    = new Set(readJ<string[]>("favourites.json") ?? []);
-    const bkListRaw = readJ<unknown[]>("bookmarks.json") ?? [];
-    const masterRaw = readJ<Array<{ name?: string; collection_ids?: string[] }>>("collections/master_collections.json") ?? [];
-
-    type PC = { name: string; items: Array<{ filename: string; hide_from_main?: boolean }> };
-    const pdfCols: PC[] = [];
-    for (const e of zip.getEntries()) {
-      if (!e.isDirectory && e.entryName.startsWith("collections/") && e.entryName.endsWith(".json")) {
-        try {
-          const c = JSON.parse(e.getData().toString("utf8")) as PC;
-          if (c?.name && Array.isArray(c.items)) pdfCols.push(c);
-        } catch { /**/ }
-      }
-    }
-
-    // Index all encrypted media entries anywhere in the ZIP by their basename without .enc
-    type EncEntry = { zipPath: string; hash: string; entry: AdmZip.IZipEntry };
-    const encByHash = new Map<string, EncEntry>();
-    for (const e of zip.getEntries()) {
-      if (e.isDirectory || !e.entryName.toLowerCase().endsWith(".enc")) continue;
-      const base = path.basename(e.entryName, path.extname(e.entryName));
-      if (!encByHash.has(base)) encByHash.set(base, { zipPath: e.entryName, hash: base, entry: e });
-    }
-
-    // Resolve original name
-    const resolveName = (hash: string): string => {
-      if (fileMap[`${hash}.enc`]) return fileMap[`${hash}.enc`];
-      if (fileMap[hash]) return fileMap[hash];
-      return `${hash}.jpg`;
-    };
-
-    // Tag index
-    type TagIndex = Map<string, Set<string>>;
-    const buildTagIndex = (): TagIndex => {
-      const idx: TagIndex = new Map();
-      const add = (f: string, tag: string) => {
-        const clean = tag.trim().toLowerCase();
-        if (!clean) return;
-        const key = path.basename(String(f)).toLowerCase();
-        const set = idx.get(key) ?? new Set<string>();
-        set.add(clean); idx.set(key, set);
-      };
-      const directTags = tagsRaw as Record<string, string[]>;
-      if (directTags && typeof directTags === "object" && !Array.isArray(directTags)) {
-        const maybeFileTags = directTags.file_tags as Record<string, string[]> | undefined;
-        const maybeTags = directTags.tags as Record<string, string[]> | undefined;
-        if (maybeFileTags) {
-          for (const [f, tags] of Object.entries(maybeFileTags)) for (const tag of Array.isArray(tags) ? tags : []) add(f, String(tag));
-        }
-        if (maybeTags) {
-          for (const [tag, files] of Object.entries(maybeTags)) for (const f of Array.isArray(files) ? files : []) add(String(f), tag);
-        }
-        for (const [f, tags] of Object.entries(directTags)) {
-          if (f === "tags" || f === "file_tags") continue;
-          if (Array.isArray(tags)) for (const tag of tags) add(f, String(tag));
-        }
-      }
-      return idx;
-    };
-    const tagIndex = buildTagIndex();
-
-    const bookmarksList = (bkListRaw ?? []).map((entry) => (typeof entry === "string" ? entry : String((entry as { url?: string })?.url ?? ""))).filter(Boolean);
-
-    let imported = 0, failed = 0, decErr = 0;
-    const n2i = new Map<string, MediaItem>();
-
-    for (const [hash, { entry }] of encByHash) {
-      const origName = resolveName(hash);
-      const encData = entry.getData();
-
-      let plain: Buffer;
-      try {
-        plain = decryptPdfFernet(encData);
-      } catch {
-        decErr++;
-        try { plain = encData; } catch { failed++; continue; }
-      }
-
-      const sha256 = crypto.createHash("sha256").update(plain).digest("hex");
-
-      try {
-        // Detect media type and mime
-        const isVid = (plain.length >= 12 && plain.subarray(4, 8).toString("ascii") === "ftyp") || /\.(mp4|mov|webm)$/i.test(origName);
-        const mime = isVid ? (/\.mov$/i.test(origName) ? "video/quicktime" : /\.webm$/i.test(origName) ? "video/webm" : "video/mp4") : (
-          (plain.length >= 8 && plain[0] === 0x89 && plain.subarray(1, 4).toString("ascii") === "PNG") || /\.png$/i.test(origName) ? "image/png" :
-          (plain.length >= 12 && plain.subarray(0, 4).toString("ascii") === "RIFF" && plain.subarray(8, 12).toString("ascii") === "WEBP") || /\.webp$/i.test(origName) ? "image/webp" :
-          (plain.length >= 6 && plain.subarray(0, 3).toString("ascii") === "GIF") || /\.gif$/i.test(origName) ? "image/gif" :
-          "image/jpeg"
-        );
-
-        // Find existing to overwrite, or create new
-        const existing = media.find(m => m.sha256 === sha256) ?? media.find(m => m.originalName.toLowerCase() === origName.toLowerCase());
-        const item: MediaItem = existing ?? {
-          id: makeId("m"),
-          originalName: origName,
-          type: isVid ? "video" : "image",
-          thumbUrl: "",
-          fileUrl: "",
-          mime,
-          size: plain.length,
-          favourite: favSet.has(origName) || favSet.has(hash),
-          tags: [],
-          hideFromMain: false,
-          duplicate: false,
-          lost: false,
-          createdAt: new Date().toISOString(),
-          sha256,
-        };
-
-        if (existing) {
-          item.type = isVid ? "video" : "image";
-          item.mime = mime;
-          item.size = plain.length;
-          item.sha256 = sha256;
-          item.lost = false;
-          if (favSet.has(origName) || favSet.has(hash)) item.favourite = true;
-        }
-
-        // Attach tags from index
-        const wantTags = tagIndex.get(origName.toLowerCase()) ?? tagIndex.get(hash.toLowerCase());
-        if (wantTags) item.tags = Array.from(new Set([...item.tags, ...Array.from(wantTags)]));
-
-        // Generate thumbnail for images
-        let thumb: Buffer | undefined;
-        if (!isVid) {
-          try {
-            thumb = await sharp(plain)
-              .resize(320, 320, { fit: "inside", withoutEnlargement: true })
-              .webp({ quality: 65 })
-              .toBuffer();
-          } catch {
-            thumb = undefined;
-          }
-        }
-
-        // Write using pre-encrypted token directly (skip individual saveState calls!)
-        await writePreEncryptedMedia(item, encData, thumb, true);
-
-        if (!existing) media.unshift(item);
-        n2i.set(origName.toLowerCase(), item);
-        n2i.set(hash.toLowerCase(), item);
-        imported++;
-      } catch {
-        failed++;
-      }
-    }
-
-    // Tags: ensure every tag has a matching collection
-    const ensureTagCollection = (tag: string) => {
-      const lower = tag.toLowerCase();
-      let col = collections.find(c => c.name.toLowerCase() === lower);
+      let col = collections.find(c => c.name.toLowerCase() === tag.toLowerCase());
       if (!col) { col = { id: makeId("c"), name: tag, itemCount: 0, coverThumbUrl: null, mediaIds: [] }; collections.push(col); }
-      return col;
-    };
-    for (const item of media) {
-      for (const tag of item.tags) {
-        const col = ensureTagCollection(tag);
-        if (!col.mediaIds.includes(item.id)) col.mediaIds.push(item.id);
-        col.itemCount = col.mediaIds.length;
-        if (item.thumbUrl && !col.coverThumbUrl) col.coverThumbUrl = item.thumbUrl;
-      }
-    }
-
-    // Collections
-    let colsAdded = 0;
-    for (const pc of pdfCols) {
-      let col = collections.find(c => c.name.toLowerCase() === pc.name.toLowerCase());
-      if (!col) { col = { id: makeId("c"), name: pc.name, itemCount: 0, coverThumbUrl: null, mediaIds: [] }; collections.push(col); colsAdded++; }
-      for (const ci of pc.items) {
-        const item = n2i.get(ci.filename.toLowerCase()) ?? media.find(m => m.originalName.toLowerCase() === ci.filename.toLowerCase() || m.sha256 === ci.filename);
-        if (!item) continue;
-        if (!col.mediaIds.includes(item.id)) col.mediaIds.push(item.id);
-        if (ci.hide_from_main) item.hideFromMain = true;
-        const tn = pc.name.toLowerCase();
-        if (!item.tags.includes(tn)) item.tags.push(tn);
-      }
->>>>>>> Stashed changes
+      if (!col.mediaIds.includes(item.id)) col.mediaIds.push(item.id);
       col.itemCount = col.mediaIds.length;
-      const cover = media.find(m => col!.mediaIds.includes(m.id));
-      if (cover?.thumbUrl) col.coverThumbUrl = cover.thumbUrl;
-    }
-
-    // Master collections
-    let mastersAdded = 0;
-    for (const master of masterRaw) {
-      const name = String(master?.name ?? "").trim();
-      if (!name) continue;
-      let mc = masterCollections.find(m => m.name.toLowerCase() === name.toLowerCase());
-      if (!mc) { mc = { id: makeId("mc"), name, collectionIds: [] }; masterCollections.push(mc); mastersAdded++; }
-      for (const cid of master.collection_ids ?? []) {
-        const legacy = collections.find(c => c.id === String(cid));
-        const byName = legacy ? null : collections.find(c => c.name.toLowerCase() === String(cid).toLowerCase());
-        const target = legacy ?? byName;
-        if (target && !mc.collectionIds.includes(target.id)) mc.collectionIds.push(target.id);
-      }
-    }
-
-    // Bookmarks
-    let bkAdded = 0;
-    for (const url of bookmarksList) {
-      if (!url || bookmarks.some(b => b.url === url)) continue;
-      bookmarks.push({ id: makeId("b"), url, order: bookmarks.length }); bkAdded++;
-    }
-
-    // Single unified save to MongoDB Atlas!
-    saveState();
-    await flushState();
-
-    return res.json({
-      ok: true,
-      imported,
-      skipped: 0,
-      failed,
-      decryptErrors: decErr,
-      collectionsImported: pdfCols.length || colsAdded,
-      masterCollectionsImported: mastersAdded || masterRaw.length,
-      bookmarksImported: bkAdded || bookmarksList.length,
-      message: `Imported ${imported} media, ${pdfCols.length || colsAdded} collections, ${mastersAdded || masterRaw.length} master collections, and ${bkAdded || bookmarksList.length} bookmarks.`
-    });
-  } finally {
-    if (file.path) {
-      try { fs.unlinkSync(file.path); } catch { /* ignore */ }
+      if (item.thumbUrl) col.coverThumbUrl = item.thumbUrl;
     }
   }
-<<<<<<< Updated upstream
 
   // Collections
   let colsAdded = 0;
-  const collectionIdByName = new Map<string, string>();
   for (const pc of pdfCols) {
     let col = collections.find(c => c.name.toLowerCase() === pc.name.toLowerCase());
     if (!col) { col = { id: makeId("c"), name: pc.name, itemCount: 0, coverThumbUrl: null, mediaIds: [] }; collections.push(col); colsAdded++; }
-    collectionIdByName.set(pc.name, col.id);
     for (const ci of pc.items) {
       const item = n2i.get(ci.filename) ?? media.find(m => m.originalName === ci.filename);
       if (!item) continue;
@@ -960,33 +677,16 @@ router.post("/import/vault", importMultipart.single("file"), async (req, res) =>
     if (cover?.thumbUrl) col.coverThumbUrl = cover.thumbUrl;
   }
 
-  // Master collections
-  let mastersAdded = 0;
-  for (const master of masterRaw) {
-    const name = String(master?.name ?? "").trim();
-    if (!name) continue;
-    let mc = masterCollections.find(m => m.name.toLowerCase() === name.toLowerCase());
-    if (!mc) { mc = { id: makeId("mc"), name, collectionIds: [] }; masterCollections.push(mc); mastersAdded++; }
-    for (const cid of master.collection_ids ?? []) {
-      const legacy = collections.find(c => c.id === String(cid));
-      const byName = legacy ? null : collections.find(c => c.name.toLowerCase() === String(cid).toLowerCase());
-      const target = legacy ?? byName;
-      if (target && !mc.collectionIds.includes(target.id)) mc.collectionIds.push(target.id);
-    }
-  }
-
   // Bookmarks
   let bkAdded = 0;
-  for (const url of bookmarks) {
+  for (const url of bkList) {
     if (!url || bookmarks.some(b => b.url === url)) continue;
     bookmarks.push({ id: makeId("b"), url, order: bookmarks.length }); bkAdded++;
   }
 
   saveState(); await flushState();
-  return res.json({ ok: true, imported, skipped, failed, decryptErrors: decErr, collectionsImported: colsAdded, masterCollectionsImported: mastersAdded, bookmarksImported: bkAdded,
-    message: `Imported ${imported} media (${skipped} not found in archive, ${failed} failed, ${decErr} decrypt errors). ${colsAdded} collections, ${mastersAdded} master collections and ${bkAdded} bookmarks added.` });
-=======
->>>>>>> Stashed changes
+  return res.json({ ok: true, imported, skipped, failed, decryptErrors: decErr, collectionsImported: colsAdded, bookmarksImported: bkAdded,
+    message: `Imported ${imported} media (${skipped} not found in archive, ${failed} failed, ${decErr} decrypt errors). ${colsAdded} collections and ${bkAdded} bookmarks added.` });
 });
 
 export default router;

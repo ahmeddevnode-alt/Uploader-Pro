@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { MediaGrid } from '@/components/media-grid';
 import { PageHeading } from '@/components/uploader-shell';
+import { useLayoutPreference, LayoutSwitcher } from '@/components/layout-preferences';
 
 export default function CollectionDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -43,6 +44,7 @@ export default function CollectionDetailPage() {
   const [selectedMedia, setSelectedMedia] = useState('');
   const [hideFromMain, setHideFromMain] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [layout, setLayout] = useLayoutPreference('collection-detail');
 
   const collection = collections.data?.find((c) => c.id === id);
   const collectionMedia = (allMedia.data?.items ?? []).filter((item) =>
@@ -177,10 +179,11 @@ export default function CollectionDetailPage() {
         </div>
       ) : (
         <>
-          <div className="mb-6 flex items-center justify-between">
+          <div className="mb-6 flex items-center justify-between gap-4">
             <p className="font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
               <span className="text-foreground">{collectionMedia.length}</span> items in collection
             </p>
+            <LayoutSwitcher layout={layout} onChange={setLayout} />
           </div>
 
           {/* Compact thumbnail grid with remove buttons */}
@@ -217,7 +220,7 @@ export default function CollectionDetailPage() {
           <p className="mb-4 font-mono text-[11px] uppercase tracking-[.12em] text-muted-foreground">
             Full view
           </p>
-          <MediaGrid items={collectionMedia} />
+          <MediaGrid items={collectionMedia} layout={layout} />
         </>
       )}
 

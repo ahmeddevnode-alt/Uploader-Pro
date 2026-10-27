@@ -353,10 +353,6 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
-<<<<<<< Updated upstream
-        </div>
-=======
->>>>>>> Stashed changes
       </section>
     </div>
   );
