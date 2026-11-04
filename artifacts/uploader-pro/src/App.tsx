@@ -13,6 +13,7 @@ import CollectionDetailPage from '@/pages/collection-detail';
 import DuplicatesPage from '@/pages/duplicates';
 import BookmarksPage from '@/pages/bookmarks';
 import MasterCollectionsPage from '@/pages/master-collections';
+import BulkDownloadPage from '@/pages/bulk-download';
 import { UploaderShell } from '@/components/uploader-shell';
 import { setAuthTokenGetter } from '@workspace/api-client-react';
 
@@ -38,6 +39,7 @@ function Router() {
         <Route path="/master-collections"><UploaderShell><MasterCollectionsPage /></UploaderShell></Route>
         <Route path="/duplicates"><UploaderShell><DuplicatesPage /></UploaderShell></Route>
         <Route path="/bookmarks"><UploaderShell><BookmarksPage /></UploaderShell></Route>
+        <Route path="/bulk-download"><UploaderShell><BulkDownloadPage /></UploaderShell></Route>
         <Route component={NotFound} />
       </Switch>
     </RoutedErrorBoundary>

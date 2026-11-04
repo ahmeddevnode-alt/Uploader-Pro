@@ -3,12 +3,13 @@ import type { ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
 import { getGetStatsQueryKey, getGetWatcherStatusQueryKey, getListMediaQueryKey, useEncryptAllMedia, useGetWatcherStatus } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Bookmark, Camera, CircleHelp, Copy, FolderHeart, FolderTree, Images, LayoutDashboard, LoaderCircle, LogOut, Menu, Plus, Search, ShieldCheck, Star, Tag, UploadCloud, X } from 'lucide-react';
+import { Bookmark, Camera, CircleHelp, Copy, Download, FolderHeart, FolderTree, Images, LayoutDashboard, LoaderCircle, LogOut, Menu, Plus, Search, ShieldCheck, Star, Tag, UploadCloud, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 const primaryNav = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
   { href: '/new', label: 'New uploads', icon: UploadCloud },
+  { href: '/bulk-download', label: 'Bulk download', icon: Download },
   { href: '/all', label: 'All media', icon: Images },
   { href: '/favourites', label: 'Favourites', icon: Star },
   { href: '/untagged', label: 'Untagged', icon: Tag },
