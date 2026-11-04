@@ -103,7 +103,7 @@ export async function saveVaultState(state: StoredState) {
   const tags = Array.from(
     new Set(state.media.flatMap((item) => (Array.isArray(item.tags) ? item.tags : [])).map(String)),
   ).map((name) => ({ id: name, name, createdAt: new Date().toISOString() }));
-  await Promise.allSettled([
+  await Promise.all([
     replaceRecords(MediaRecord, state.media),
     replaceRecords(CollectionRecord, state.collections),
     replaceRecords(MasterCollectionRecord, state.masterCollections),

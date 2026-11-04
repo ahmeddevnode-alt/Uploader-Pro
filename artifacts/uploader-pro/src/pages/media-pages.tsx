@@ -2,20 +2,43 @@ import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent } from 'react';
 import { Link } from 'wouter';
 import { useQueryClient } from '@tanstack/react-query';
+import { listMedia } from '@workspace/api-client-react';
 import { getListMediaQueryKey, getGetDecryptJobQueryKey, useCreateDecryptJob, useGetDecryptJob, useListMedia, DecryptJobInputFormat } from '@workspace/api-client-react';
 import type { ListMediaParams } from '@workspace/api-client-react';
-import { ArrowDownToLine, Check, FileImage, FolderOpen, LoaderCircle, UploadCloud, X } from 'lucide-react';
+import { ArrowDownToLine, Check, ChevronLeft, ChevronRight, FileImage, FolderOpen, LoaderCircle, UploadCloud, X } from 'lucide-react';
 import { MediaGrid, MediaToolbar } from '@/components/media-grid';
 import { PageHeading } from '@/components/uploader-shell';
 import { useLayoutPreference, LayoutSwitcher } from '@/components/layout-preferences';
 
 export function MediaPage({ view, title, description }: { view: ListMediaParams['view']; title: string; description: string }) {
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
   const [sort, setSort] = useState('recent');
   const [type, setType] = useState<'all' | 'image' | 'video'>('all');
   const [layout, setLayout] = useLayoutPreference('media');
   const typeParam = type === 'all' ? undefined : type;
-  const query = useListMedia({ view, limit: 100, type: typeParam }, { query: { queryKey: getListMediaQueryKey({ view, limit: 100, type: typeParam }), refetchInterval: view === 'new' ? 10000 : false, refetchOnWindowFocus: true } });
+  const mediaParams = { view, limit: 100, type: typeParam };
+  const query = useListMedia(mediaParams, {
+    query: {
+      queryKey: getListMediaQueryKey(mediaParams),
+      queryFn: async () => {
+        const firstPage = await listMedia({ ...mediaParams, page: 1 });
+        const allItems = [...firstPage.items];
+
+        // Fetch subsequent API pages; the server caps each page at 100.
+        const totalPages = Math.ceil(firstPage.total / firstPage.limit);
+        for (let page = 2; page <= totalPages; page++) {
+          const result = await listMedia({ ...mediaParams, page });
+          allItems.push(...result.items);
+        }
+
+        return { ...firstPage, items: allItems };
+      },
+      refetchInterval: view === 'new' ? 10000 : false,
+      refetchOnWindowFocus: true,
+    },
+  });
   const imageCount = useListMedia({ view, type: 'image', limit: 1 });
   const videoCount = useListMedia({ view, type: 'video', limit: 1 });
   const items = useMemo(() => {
@@ -37,7 +60,34 @@ export function MediaPage({ view, title, description }: { view: ListMediaParams[
         : +new Date(b.createdAt) - +new Date(a.createdAt),
     );
   }, [query.data?.items, search, sort]);
-  return <div className="mx-auto max-w-[1440px]"><PageHeading eyebrow={view === 'new' ? 'Incoming frames' : view === 'favourites' ? 'Marked moments' : view === 'untagged' ? 'Needs context' : 'The full archive'} title={title} description={description} action={<div className="flex flex-wrap gap-2">{view !== 'new' ? <Link href="/new" className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-xs font-extrabold hover:border-primary/50 hover:text-primary" data-testid="link-add-from-media"><UploadCloud size={15} /> Add media</Link> : null}<BulkDownloadButton view={view} type={typeParam} search={search} /></div>} /><MediaTypeTabs type={type} setType={setType} images={imageCount.data?.total ?? 0} videos={videoCount.data?.total ?? 0} /><MediaToolbar count={query.data?.total ?? items.length} onSearch={setSearch} filter={sort} setFilter={setSort} layout={layout} onLayoutChange={setLayout} />{query.isLoading ? <MediaSkeleton /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : <MediaGrid items={items} emptyTitle={view === 'untagged' ? 'Everything has context' : 'No media found'} emptyCopy={search ? 'Try a different name or clear your filter.' : 'Import a few frames to make this view yours.'} layout={layout} />}</div>;
+
+  const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
+  const pageItems = items.slice((page - 1) * pageSize, page * pageSize);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, sort, type, view]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount));
+  }, [pageCount]);
+
+  return <div className="mx-auto max-w-[1440px]"><PageHeading eyebrow={view === 'new' ? 'Incoming frames' : view === 'favourites' ? 'Marked moments' : view === 'untagged' ? 'Needs context' : 'The full archive'} title={title} description={description} action={<div className="flex flex-wrap gap-2">{view !== 'new' ? <Link href="/new" className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-xs font-extrabold hover:border-primary/50 hover:text-primary" data-testid="link-add-from-media"><UploadCloud size={15} /> Add media</Link> : null}<BulkDownloadButton view={view} type={typeParam} search={search} /></div>} /><MediaTypeTabs type={type} setType={setType} images={imageCount.data?.total ?? 0} videos={videoCount.data?.total ?? 0} /><MediaToolbar count={query.data?.total ?? items.length} onSearch={setSearch} filter={sort} setFilter={setSort} layout={layout} onLayoutChange={setLayout} />{query.isLoading ? <MediaSkeleton /> : query.isError ? <ErrorState onRetry={() => query.refetch()} /> : <><MediaGrid items={pageItems} emptyTitle={view === 'untagged' ? 'Everything has context' : 'No media found'} emptyCopy={search ? 'Try a different name or clear your filter.' : 'Import a few frames to make this view yours.'} layout={layout} />
+    {items.length > pageSize ? <nav aria-label="Media pagination" className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+      <p className="text-xs text-muted-foreground">
+        Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, items.length)} of {items.length} matching items
+      </p>
+      <div className="flex items-center gap-2">
+        <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page === 1} className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-3 py-2 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-40">
+          <ChevronLeft size={15} /> Previous
+        </button>
+        <span className="px-2 font-mono text-xs text-muted-foreground">Page {page} of {pageCount}</span>
+        <button type="button" onClick={() => setPage((current) => Math.min(pageCount, current + 1))} disabled={page >= pageCount} className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-3 py-2 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-40">
+          Next <ChevronRight size={15} />
+        </button>
+      </div>
+    </nav> : null}
+  </>}</div>;
 }
 
 export function NewUploadsPage() {

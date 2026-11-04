@@ -467,6 +467,25 @@ function MediaTile({ media, index, layout = "comfortable" }: { media: Media; ind
   const [tagModalOpen, setTagModalOpen] = useState(false);
   const [lightbox, setLightbox] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const touchGestureRef = useRef<{
+    mode: "pan" | "pinch";
+    startDistance: number;
+    startZoom: number;
+    startPanX: number;
+    startPanY: number;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  } | null>(null);
+  const lastTapRef = useRef(0);
+  const openLightbox = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    touchGestureRef.current = null;
+    lastTapRef.current = 0;
+    setLightbox(true);
+  };
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -512,7 +531,7 @@ function MediaTile({ media, index, layout = "comfortable" }: { media: Media; ind
           <div className="relative h-16 w-16 shrink-0 overflow-hidden bg-secondary sm:h-20 sm:w-20">
             <button
               disabled={media.lost}
-              onClick={() => setLightbox(true)}
+              onClick={openLightbox}
               className="block h-full w-full disabled:cursor-not-allowed"
               aria-label={`Open ${media.originalName}`}
             >
@@ -532,6 +551,7 @@ function MediaTile({ media, index, layout = "comfortable" }: { media: Media; ind
                   alt={media.originalName}
                   className={`h-full w-full object-cover ${media.lost ? "opacity-50 grayscale" : ""}`}
                   loading="lazy"
+                  decoding="async"
                 />
               ) : (
                 <span className="grid h-full w-full place-items-center text-muted-foreground">
@@ -651,7 +671,7 @@ function MediaTile({ media, index, layout = "comfortable" }: { media: Media; ind
           {media.type === "video" ? (
             <button
               disabled={media.lost}
-              onClick={() => setLightbox(true)}
+              onClick={openLightbox}
               onMouseEnter={(event) => {
                 void event.currentTarget
                   .querySelector("video")
@@ -683,7 +703,7 @@ function MediaTile({ media, index, layout = "comfortable" }: { media: Media; ind
           ) : media.thumbUrl ? (
             <button
               disabled={media.lost}
-              onClick={() => setLightbox(true)}
+              onClick={openLightbox}
               className="block w-full disabled:cursor-not-allowed"
               aria-label={`Open ${media.originalName}`}
             >
@@ -694,12 +714,13 @@ function MediaTile({ media, index, layout = "comfortable" }: { media: Media; ind
                   media.lost ? "opacity-50 grayscale" : ""
                 }`}
                 loading="lazy"
+                  decoding="async"
               />
             </button>
           ) : (
             <button
               disabled={media.lost}
-              onClick={() => setLightbox(true)}
+              onClick={openLightbox}
               className="grid min-h-36 w-full place-items-center text-muted-foreground"
             >
               <Film size={25} />
@@ -963,8 +984,99 @@ function MediaTile({ media, index, layout = "comfortable" }: { media: Media; ind
               <img
                 src={media.fileUrl}
                 alt={media.originalName}
-                className="max-h-full max-w-full object-contain transition-transform"
-                style={{ transform: `scale(${zoom})` }}
+                draggable={false}
+                className="max-h-full max-w-full object-contain select-none"
+                style={{
+                  transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
+                  transformOrigin: "center center",
+                  touchAction: "none",
+                  transition: touchGestureRef.current?.moved ? "none" : "transform 150ms ease",
+                  willChange: "transform",
+                }}
+                onTouchStart={(event) => {
+                  event.stopPropagation();
+                  const touches = event.touches;
+
+                  if (touches.length >= 2) {
+                    const dx = touches[0].clientX - touches[1].clientX;
+                    const dy = touches[0].clientY - touches[1].clientY;
+                    touchGestureRef.current = {
+                      mode: "pinch",
+                      startDistance: Math.hypot(dx, dy),
+                      startZoom: zoom,
+                      startPanX: pan.x,
+                      startPanY: pan.y,
+                      startX: 0,
+                      startY: 0,
+                      moved: true,
+                    };
+                  } else if (touches.length === 1) {
+                    touchGestureRef.current = {
+                      mode: "pan",
+                      startDistance: 0,
+                      startZoom: zoom,
+                      startPanX: pan.x,
+                      startPanY: pan.y,
+                      startX: touches[0].clientX,
+                      startY: touches[0].clientY,
+                      moved: false,
+                    };
+                  }
+                }}
+                onTouchMove={(event) => {
+                  event.stopPropagation();
+                  const gesture = touchGestureRef.current;
+                  const touches = event.touches;
+                  if (!gesture) return;
+
+                  if (gesture.mode === "pinch" && touches.length >= 2) {
+                    const dx = touches[0].clientX - touches[1].clientX;
+                    const dy = touches[0].clientY - touches[1].clientY;
+                    const distance = Math.hypot(dx, dy);
+                    if (gesture.startDistance > 0) {
+                      setZoom(
+                        Math.max(
+                          0.5,
+                          Math.min(5, gesture.startZoom * distance / gesture.startDistance),
+                        ),
+                      );
+                    }
+                    gesture.moved = true;
+                  } else if (gesture.mode === "pan" && touches.length === 1 && zoom > 1) {
+                    setPan({
+                      x: gesture.startPanX + touches[0].clientX - gesture.startX,
+                      y: gesture.startPanY + touches[0].clientY - gesture.startY,
+                    });
+                    gesture.moved = true;
+                  }
+                }}
+                onTouchEnd={(event) => {
+                  event.stopPropagation();
+                  const gesture = touchGestureRef.current;
+
+                  if (
+                    gesture?.mode === "pan" &&
+                    !gesture.moved &&
+                    event.changedTouches.length === 1
+                  ) {
+                    const now = Date.now();
+                    if (now - lastTapRef.current < 300) {
+                      if (zoom > 1) {
+                        setZoom(1);
+                        setPan({ x: 0, y: 0 });
+                      } else {
+                        setZoom(2);
+                      }
+                      lastTapRef.current = 0;
+                    } else {
+                      lastTapRef.current = now;
+                    }
+                  } else if (gesture?.moved) {
+                    lastTapRef.current = 0;
+                  }
+
+                  touchGestureRef.current = null;
+                }}
               />
             )}
           </div>

@@ -34,6 +34,16 @@ function getObjectFile(objectPath: string) {
   return storage.bucket(bucketName).file(objectName);
 }
 
+export async function privateObjectExists(objectPath: string) {
+  if (!objectPath.startsWith("/objects/")) return false;
+  try {
+    const [exists] = await getObjectFile(objectPath).exists();
+    return exists;
+  } catch {
+    return false;
+  }
+}
+
 export function isAppStorageConfigured() {
   return Boolean(process.env.PRIVATE_OBJECT_DIR);
 }

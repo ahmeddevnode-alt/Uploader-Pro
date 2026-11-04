@@ -25,7 +25,7 @@ export function useLayoutPreference(scope: string): [LayoutMode, (mode: LayoutMo
       const stored = localStorage.getItem(key);
       if (stored && LAYOUT_MODES.includes(stored as LayoutMode)) return stored as LayoutMode;
     } catch { /* ignore */ }
-    return 'comfortable';
+    return 'compact';
   });
   const update = (mode: LayoutMode) => {
     setLayout(mode);

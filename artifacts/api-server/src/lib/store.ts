@@ -60,6 +60,7 @@ export const masterCollections = state.masterCollections;
 export const decryptJobs = new Map<string, { id: string; status: "queued" | "processing" | "done" | "error"; done: number; total: number; mediaIds?: string[]; resultPath?: string; error?: string }>();
 let mongoReady = false;
 let saveQueue: Promise<void> = Promise.resolve();
+let saveError: unknown = null;
 let watcherRunning = false;
 let watcherPending = 0;
 let watcherFailed = 0;
@@ -92,20 +93,27 @@ export function saveState() {
     return;
   }
   const snapshot = JSON.parse(JSON.stringify(state)) as PersistedState;
-  saveQueue = saveQueue
-    .then(() => saveVaultState(snapshot as unknown as {
-      media: Record<string, unknown>[];
-      collections: Record<string, unknown>[];
-      bookmarks: Record<string, unknown>[];
-      masterCollections: Record<string, unknown>[];
-    }))
-    .catch((error: unknown) => {
+  saveQueue = saveQueue.then(async () => {
+    try {
+      await saveVaultState(snapshot as unknown as {
+        media: Record<string, unknown>[];
+        collections: Record<string, unknown>[];
+        bookmarks: Record<string, unknown>[];
+        masterCollections: Record<string, unknown>[];
+      });
+      saveError = null;
+    } catch (error: unknown) {
+      saveError = error;
       logger.error({ err: error }, "Failed to persist vault metadata.");
-    });
+    }
+  });
 }
 
 export async function flushState() {
   await saveQueue;
+  if (saveError) {
+    throw new Error("Vault metadata persistence failed. Check API logs.");
+  }
 }
 
 export async function persistDecryptJob(job: {
@@ -206,8 +214,25 @@ export async function readDecryptedThumbnail(item: MediaItem) {
 }
 
 export async function removeMediaFiles(item: MediaItem) {
-  for (const target of [item.encPath, item.thumbEncPath]) {
-    if (target) await deleteEncryptedObject(target);
+  const targets = [item.encPath, item.thumbEncPath];
+
+  for (const target of targets) {
+    if (!target) continue;
+
+    const normalized = (value: string) =>
+      value.startsWith("/objects/") ? value : path.resolve(value);
+
+    const stillReferenced = media.some((other) =>
+      other !== item &&
+      [other.encPath, other.thumbEncPath].some(
+        (otherPath) =>
+          Boolean(otherPath) && normalized(otherPath!) === normalized(target)
+      )
+    );
+
+    if (!stillReferenced) {
+      await deleteEncryptedObject(target);
+    }
   }
 }
 

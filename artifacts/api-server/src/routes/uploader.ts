@@ -7,7 +7,8 @@ import archiver from "archiver";
 import jwt from "jsonwebtoken";
 import sharp from "sharp";
 import AdmZip from "adm-zip";
-import { collections, bookmarks, masterCollections, decryptJobs, media, type MediaItem, saveState, flushState, writeEncryptedMedia, writePreEncryptedMedia, readDecryptedMedia, readDecryptedThumbnail, removeMediaFiles, getWatcherStatus, encryptPlaintextSweep, persistDecryptJob } from "../lib/store";
+import { privateObjectExists } from "../lib/private-media-storage";
+import { collections, bookmarks, masterCollections, decryptJobs, media, type MediaItem, saveState, flushState, writeEncryptedMedia, writePreEncryptedMedia, readDecryptedMedia, readDecryptedThumbnail, removeMediaFiles, getWatcherStatus, encryptPlaintextSweep, persistDecryptJob, encryptedMediaPath } from "../lib/store";
 import multer from "multer";
 
 const router: IRouter = Router();
@@ -413,14 +414,55 @@ router.delete("/bookmarks/:id", (req, res) => {
 
 const buildDuplicateGroups = () => {
   const groups: { id: string; kind: "content" | "name"; media: MediaItem[] }[] = [];
+  const byHash = new Map<string, MediaItem[]>();
   const byName = new Map<string, MediaItem[]>();
-  media.forEach((item) => {
-    if (item.duplicateNameConflicts?.length) groups.push({ id: `content-${item.id}`, kind: "content", media: [item, ...item.duplicateNameConflicts.map((name) => ({ ...item, id: `${item.id}-${crypto.createHash("sha1").update(name).digest("hex").slice(0, 6)}`, originalName: name }))] });
+
+  for (const item of media) {
+    if (item.sha256) {
+      const sameHash = byHash.get(item.sha256) ?? [];
+      sameHash.push(item);
+      byHash.set(item.sha256, sameHash);
+    }
+
     const sameName = byName.get(item.originalName) ?? [];
     sameName.push(item);
     byName.set(item.originalName, sameName);
-  });
-  byName.forEach((items, name) => { if (items.length > 1) groups.push({ id: `name-${name}`, kind: "name", media: items }); });
+  }
+
+  for (const [hash, items] of byHash) {
+    if (items.length > 1) {
+      groups.push({ id: `content-${hash}`, kind: "content", media: items });
+    }
+  }
+
+  // Preserve older alias-based conflict groups when no real hash group
+  // already represents those records.
+  for (const item of media) {
+    if (
+      item.duplicateNameConflicts?.length &&
+      !(item.sha256 && (byHash.get(item.sha256)?.length ?? 0) > 1)
+    ) {
+      groups.push({
+        id: `content-${item.id}`,
+        kind: "content",
+        media: [
+          item,
+          ...item.duplicateNameConflicts.map((name) => ({
+            ...item,
+            id: `${item.id}-${crypto.createHash("sha1").update(name).digest("hex").slice(0, 6)}`,
+            originalName: name,
+          })),
+        ],
+      });
+    }
+  }
+
+  for (const [name, items] of byName) {
+    if (items.length > 1) {
+      groups.push({ id: `name-${name}`, kind: "name", media: items });
+    }
+  }
+
   return groups;
 };
 router.get("/duplicates", (_req, res) => res.json(buildDuplicateGroups()));
@@ -549,12 +591,49 @@ const importUploadDir = path.join(os.tmpdir(), "uploader-pro-imports");
 try { fs.mkdirSync(importUploadDir, { recursive: true }); } catch { /* ignore */ }
 const importMultipart = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 * 1024 } });
 
+type VaultImportProgress = {
+  status: "idle" | "processing" | "completed" | "failed";
+  stage: string;
+  processed: number;
+  total: number;
+  percent: number;
+  currentFile: string | null;
+  imported: number;
+  skipped: number;
+  failed: number;
+  decryptErrors: number;
+  startedAt: string | null;
+  completedAt: string | null;
+  error?: string;
+};
+
+let vaultImportActive = false;
+let vaultImportProgress: VaultImportProgress = {
+  status: "idle", stage: "idle", processed: 0, total: 0, percent: 0,
+  currentFile: null, imported: 0, skipped: 0, failed: 0,
+  decryptErrors: 0, startedAt: null, completedAt: null,
+};
+
+router.get("/import/vault/progress", (_req, res) => {
+  res.json(vaultImportProgress);
+});
+
 router.post("/import/vault", importMultipart.single("file"), async (req, res) => {
   const file = req.file;
   if (!file) return res.status(400).json({ error: "No file uploaded." });
   let zip: AdmZip;
   try { zip = new AdmZip(file.buffer); }
   catch { return res.status(400).json({ error: "Cannot read ZIP." }); }
+
+  if (vaultImportActive) {
+    return res.status(409).json({ error: "An import is already running." });
+  }
+  vaultImportActive = true;
+  vaultImportProgress = {
+    status: "processing", stage: "indexing", processed: 0, total: 0,
+    percent: 0, currentFile: null, imported: 0, skipped: 0, failed: 0,
+    decryptErrors: 0, startedAt: new Date().toISOString(), completedAt: null,
+  };
 
   const readJ = <T>(p: string): T | null => {
     const e = zip.getEntry(p); if (!e) return null;
@@ -594,31 +673,76 @@ router.post("/import/vault", importMultipart.single("file"), async (req, res) =>
 
   const MEXT = /\.(jpg|jpeg|png|webp|bmp|gif|jfif|heic|mp4|mov|webm)$/i;
   let imported = 0, skipped = 0, failed = 0, decErr = 0;
+  const supportedEntries = Object.entries(fileMap).filter(([, name]) => MEXT.test(name));
+  const total = supportedEntries.length;
+  vaultImportProgress.total = total;
+  vaultImportProgress.stage = "importing";
+  const updateProgress = () => {
+    vaultImportProgress.processed = processed;
+    vaultImportProgress.imported = imported;
+    vaultImportProgress.skipped = skipped;
+    vaultImportProgress.failed = failed;
+    vaultImportProgress.decryptErrors = decErr;
+    vaultImportProgress.percent = total === 0 ? 100 : Math.floor(processed / total * 100);
+  };
+  let processed = 0;
   const n2i = new Map<string, MediaItem>();
 
-  for (const [encFn, origName] of Object.entries(fileMap)) {
-    if (!MEXT.test(origName)) continue;
+  for (const [encFn, origName] of supportedEntries) {
+    vaultImportProgress.currentFile = origName;
     const ep = encMap.get(encFn);
-    if (!ep) { skipped++; continue; }
+    if (!ep) { skipped++; processed++; updateProgress(); continue; }
     const ee = zip.getEntry(ep);
-    if (!ee) { failed++; continue; }
+    if (!ee) { failed++; processed++; updateProgress(); continue; }
 
     let plain: Buffer;
-    try { plain = decryptPdfFernet(ee.getData()); }
-    catch { decErr++; try { plain = ee.getData(); } catch { failed++; continue; } }
+    try {
+      plain = decryptPdfFernet(ee.getData());
+    } catch {
+      decErr++;
+      failed++;
+      processed++;
+      updateProgress();
+      continue;
+    }
 
     const sha256 = crypto.createHash("sha256").update(plain).digest("hex");
 
     try {
       const isVid = /\.(mp4|mov|webm)$/i.test(origName);
-      const existing = media.find(m => m.sha256 === sha256) ?? media.find(m => m.originalName === origName);
+      const existing = media.find(
+        m => m.originalName === origName && m.sha256 === sha256
+      );
+      const sameContent = media.filter(m => m.sha256 === sha256);
+      const sameName = media.filter(m => m.originalName === origName);
+
       const item: MediaItem = existing ?? {
-        id: makeId("m"), originalName: origName, type: isVid ? "video" : "image",
-        thumbUrl: "", fileUrl: "", mime: isVid ? "video/mp4" : "image/jpeg",
-        size: 0, favourite: false, tags: [],
-        hideFromMain: false, duplicate: false, lost: false,
-        createdAt: new Date().toISOString(), sha256,
+        id: makeId("m"),
+        originalName: origName,
+        type: isVid ? "video" : "image",
+        thumbUrl: "",
+        fileUrl: "",
+        mime: isVid ? "video/mp4" : "image/jpeg",
+        size: 0,
+        favourite: false,
+        tags: [],
+        hideFromMain: false,
+        duplicate: false,
+        lost: false,
+        createdAt: new Date().toISOString(),
+        sha256,
       };
+
+      if (sameContent.some(m => m.id !== item.id)) {
+        item.duplicate = true;
+        for (const match of sameContent) match.duplicate = true;
+      }
+
+      if (sameName.some(m => m.id !== item.id)) {
+        item.duplicate = true;
+        for (const match of sameName) match.duplicate = true;
+      }
+
       if (existing) {
         item.type = isVid ? "video" : "image";
         item.mime = isVid ? "video/mp4" : "image/jpeg";
@@ -639,10 +763,24 @@ router.post("/import/vault", importMultipart.single("file"), async (req, res) =>
         try { thumb = await sharp(plain).rotate().resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true }).webp({ quality: 72 }).toBuffer(); }
         catch { thumb = undefined; }
       }
-      await writeEncryptedMedia(item, plain, thumb);
+      // Reuse healthy media; repair missing local encrypted files.
+      const storedPath = existing ? encryptedMediaPath(existing) : "";
+      const storedFileHealthy = Boolean(
+        existing &&
+        !existing.lost &&
+        (storedPath.startsWith("/objects/")
+          ? await privateObjectExists(storedPath)
+          : fs.existsSync(storedPath))
+      );
+      if (!storedFileHealthy) {
+        await writeEncryptedMedia(item, plain, thumb, true);
+      }
       if (!existing) media.unshift(item);
-      n2i.set(origName, item); imported++;
+      n2i.set(origName, item);
+      imported++;
     } catch { failed++; }
+    processed++;
+    updateProgress();
   }
 
   // Tags
@@ -684,7 +822,34 @@ router.post("/import/vault", importMultipart.single("file"), async (req, res) =>
     bookmarks.push({ id: makeId("b"), url, order: bookmarks.length }); bkAdded++;
   }
 
-  saveState(); await flushState();
+  vaultImportProgress.stage = "saving";
+  vaultImportProgress.currentFile = null;
+  try {
+    saveState();
+    await flushState();
+  } catch {
+    vaultImportProgress.status = "failed";
+    vaultImportProgress.stage = "failed";
+    vaultImportProgress.error = "Metadata persistence failed. Check API logs.";
+    vaultImportProgress.completedAt = new Date().toISOString();
+    vaultImportActive = false;
+    return res.status(500).json({
+      ok: false, imported, skipped, failed, decryptErrors: decErr,
+      error: vaultImportProgress.error,
+    });
+  }
+
+  vaultImportProgress.status = "completed";
+  vaultImportProgress.stage = "completed";
+  vaultImportProgress.processed = total;
+  vaultImportProgress.percent = 100;
+  vaultImportProgress.imported = imported;
+  vaultImportProgress.skipped = skipped;
+  vaultImportProgress.failed = failed;
+  vaultImportProgress.decryptErrors = decErr;
+  vaultImportProgress.completedAt = new Date().toISOString();
+  vaultImportActive = false;
+
   return res.json({ ok: true, imported, skipped, failed, decryptErrors: decErr, collectionsImported: colsAdded, bookmarksImported: bkAdded,
     message: `Imported ${imported} media (${skipped} not found in archive, ${failed} failed, ${decErr} decrypt errors). ${colsAdded} collections and ${bkAdded} bookmarks added.` });
 });
