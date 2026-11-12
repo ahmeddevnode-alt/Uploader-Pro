@@ -104,7 +104,7 @@ export function MediaGrid({
     return (
       <div className="flex flex-col gap-2 sm:gap-3">
         {items.map((media, idx) => (
-          <MediaTile key={media.id} media={media} index={idx} layout="list" />
+          <MediaTile key={media.id} media={media} index={idx} items={items} layout="list" />
         ))}
       </div>
     );
@@ -115,7 +115,7 @@ export function MediaGrid({
     return (
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
         {items.map((media, idx) => (
-          <MediaTile key={media.id} media={media} index={idx} layout="compact" />
+          <MediaTile key={media.id} media={media} index={idx} items={items} layout="compact" />
         ))}
       </div>
     );
@@ -126,7 +126,7 @@ export function MediaGrid({
     return (
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {items.map((media, idx) => (
-          <MediaTile key={media.id} media={media} index={idx} layout="details" />
+          <MediaTile key={media.id} media={media} index={idx} items={items} layout="details" />
         ))}
       </div>
     );
@@ -144,7 +144,7 @@ export function MediaGrid({
       {/* 1-col layout: phones only */}
       <div className="flex flex-col gap-3 sm:hidden">
         {items.map((media, idx) => (
-          <MediaTile key={media.id} media={media} index={idx} />
+          <MediaTile key={media.id} media={media} index={idx} items={items} />
         ))}
       </div>
       {/* 3-col layout: sm–lg */}
@@ -152,7 +152,7 @@ export function MediaGrid({
         {cols3.map((col, ci) => (
           <div key={ci} className="flex flex-1 flex-col gap-3">
             {col.map((media, idx) => (
-              <MediaTile key={media.id} media={media} index={ci + idx * 3} />
+              <MediaTile key={media.id} media={media} index={ci + idx * 3} items={items} />
             ))}
           </div>
         ))}
@@ -162,7 +162,7 @@ export function MediaGrid({
         {cols4.map((col, ci) => (
           <div key={ci} className="flex flex-1 flex-col gap-3">
             {col.map((media, idx) => (
-              <MediaTile key={media.id} media={media} index={ci + idx * 4} />
+              <MediaTile key={media.id} media={media} index={ci + idx * 4} items={items} />
             ))}
           </div>
         ))}
@@ -172,7 +172,7 @@ export function MediaGrid({
         {cols5.map((col, ci) => (
           <div key={ci} className="flex flex-1 flex-col gap-3">
             {col.map((media, idx) => (
-              <MediaTile key={media.id} media={media} index={ci + idx * 5} />
+              <MediaTile key={media.id} media={media} index={ci + idx * 5} items={items} />
             ))}
           </div>
         ))}
@@ -460,12 +460,19 @@ function TagEditorModal({
   );
 }
 
-function MediaTile({ media, index, layout = "comfortable" }: { media: Media; index: number; layout?: LayoutMode }) {
+function MediaTile({ media, index, items, layout = "comfortable" }: {
+  media: Media;
+  index: number;
+  items: Media[];
+  layout?: LayoutMode;
+}) {
   const isList = layout === "list";
   const isCompact = layout === "compact";
   const isDetails = layout === "details";
   const [tagModalOpen, setTagModalOpen] = useState(false);
   const [lightbox, setLightbox] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState(index);
+  const activeMedia = items[currentIndex] ?? media;
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const touchGestureRef = useRef<{
@@ -484,6 +491,7 @@ function MediaTile({ media, index, layout = "comfortable" }: { media: Media; ind
     setPan({ x: 0, y: 0 });
     touchGestureRef.current = null;
     lastTapRef.current = 0;
+    setCurrentIndex(index);
     setLightbox(true);
   };
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -916,12 +924,12 @@ function MediaTile({ media, index, layout = "comfortable" }: { media: Media; ind
           className="fixed inset-0 z-[70] flex flex-col bg-black/95 p-4"
           role="dialog"
           aria-modal="true"
-          aria-label={media.originalName}
+          aria-label={activeMedia.originalName}
           onClick={() => setLightbox(false)}
         >
           <header className="flex items-center gap-3 text-white">
             <p className="min-w-0 flex-1 truncate text-sm font-semibold">
-              {media.originalName}
+              {activeMedia.originalName}
             </p>
             <button
               onClick={(event) => {
@@ -947,8 +955,8 @@ function MediaTile({ media, index, layout = "comfortable" }: { media: Media; ind
               <ZoomIn size={17} />
             </button>
             <a
-              href={media.fileUrl}
-              download={media.originalName}
+              href={activeMedia.fileUrl}
+              download={activeMedia.originalName}
               onClick={(event) => event.stopPropagation()}
               className="rounded-lg p-2 hover:bg-white/10"
               aria-label="Download"
@@ -972,9 +980,9 @@ function MediaTile({ media, index, layout = "comfortable" }: { media: Media; ind
               )
             }
           >
-            {media.type === "video" ? (
+            {activeMedia.type === "video" ? (
               <video
-                src={media.fileUrl}
+                src={activeMedia.fileUrl}
                 controls
                 autoPlay
                 className="max-h-full max-w-full rounded-lg"
@@ -982,8 +990,8 @@ function MediaTile({ media, index, layout = "comfortable" }: { media: Media; ind
               />
             ) : (
               <img
-                src={media.fileUrl}
-                alt={media.originalName}
+                src={activeMedia.fileUrl}
+                alt={activeMedia.originalName}
                 draggable={false}
                 className="max-h-full max-w-full object-contain select-none"
                 style={{
@@ -1048,11 +1056,42 @@ function MediaTile({ media, index, layout = "comfortable" }: { media: Media; ind
                       y: gesture.startPanY + touches[0].clientY - gesture.startY,
                     });
                     gesture.moved = true;
+                  } else if (gesture.mode === "pan" && touches.length === 1) {
+                    const deltaX = touches[0].clientX - gesture.startX;
+                    const deltaY = touches[0].clientY - gesture.startY;
+
+                    // Prevent boundary swipes from being mistaken for double taps.
+                    if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) {
+                      gesture.moved = true;
+                    }
                   }
                 }}
                 onTouchEnd={(event) => {
                   event.stopPropagation();
                   const gesture = touchGestureRef.current;
+                  const touch = event.changedTouches[0];
+                  const deltaX = touch && gesture
+                    ? touch.clientX - gesture.startX
+                    : 0;
+
+                  // At normal zoom, horizontal swipes navigate media.
+                  // Right = next, left = previous.
+                  if (
+                    gesture?.mode === "pan" &&
+                    zoom <= 1 &&
+                    Math.abs(deltaX) >= 60
+                  ) {
+                    const nextIndex = currentIndex + (deltaX > 0 ? 1 : -1);
+
+                    if (nextIndex >= 0 && nextIndex < items.length) {
+                      setCurrentIndex(nextIndex);
+                      setZoom(1);
+                      setPan({ x: 0, y: 0 });
+                      lastTapRef.current = 0;
+                      touchGestureRef.current = null;
+                      return;
+                    }
+                  }
 
                   if (
                     gesture?.mode === "pan" &&

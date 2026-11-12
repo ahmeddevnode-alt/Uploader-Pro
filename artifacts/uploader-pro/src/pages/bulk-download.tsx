@@ -88,6 +88,13 @@ export default function BulkDownloadPage() {
   // URL input list
   const [urlInputs, setUrlInputs] = useState<string[]>([""]);
   const [submitting, setSubmitting] = useState(false);
+  const [showPasteFallback, setShowPasteFallback] = useState(false);
+  const [pasteFallbackText, setPasteFallbackText] = useState("");
+  const pasteFallbackRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (showPasteFallback) pasteFallbackRef.current?.focus();
+  }, [showPasteFallback]);
 
   // Job list (persists across poll intervals)
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -137,18 +144,45 @@ export default function BulkDownloadPage() {
   const updateRow = (i: number, value: string) =>
     setUrlInputs((prev) => prev.map((v, idx) => (idx === i ? value : v)));
 
+  const applyPastedUrls = (text: string) => {
+    const lines = text
+      .split(/[\n\r,]+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (!lines.length) {
+      toast({
+        title: "No URLs found",
+        description: "Paste one or more links first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setUrlInputs(lines.length === 1 ? [lines[0], ""] : lines);
+    setPasteFallbackText("");
+    setShowPasteFallback(false);
+  };
+
   const pasteFromClipboard = async () => {
     try {
+      if (!navigator.clipboard?.readText) {
+        throw new Error("Clipboard API unavailable");
+      }
+
       const text = await navigator.clipboard.readText();
-      const lines = text
-        .split(/[\n\r,]+/)
-        .map((l) => l.trim())
-        .filter(Boolean);
-      if (lines.length) {
-        setUrlInputs(lines.length === 1 ? [lines[0], ""] : lines);
+
+      if (text.trim()) {
+        applyPastedUrls(text);
+      } else {
+        toast({ title: "Clipboard is empty", description: "Copy your URLs first." });
       }
     } catch {
-      toast({ title: "Clipboard access denied", variant: "destructive" });
+      setShowPasteFallback(true);
+      toast({
+        title: "Use your phone's Paste action",
+        description: "Long-press the box below and tap Paste.",
+      });
     }
   };
 
@@ -252,6 +286,39 @@ export default function BulkDownloadPage() {
                 Paste URLs
               </button>
             </div>
+
+            {showPasteFallback && (
+              <div className="space-y-2 rounded-xl border border-primary/30 bg-primary/5 p-3">
+                <p className="text-xs font-semibold text-foreground">
+                  Paste your copied URLs here
+                </p>
+                <textarea
+                  ref={pasteFallbackRef}
+                  value={pasteFallbackText}
+                  onChange={(e) => setPasteFallbackText(e.target.value)}
+                  placeholder="Long-press here and choose Paste…"
+                  rows={3}
+                  className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono text-foreground placeholder:text-muted-foreground/60 focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowPasteFallback(false)}
+                    className="rounded-lg px-3 py-2 text-[11px] font-semibold text-muted-foreground hover:bg-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyPastedUrls(pasteFallbackText)}
+                    disabled={!pasteFallbackText.trim()}
+                    className="rounded-lg bg-primary px-3 py-2 text-[11px] font-semibold text-primary-foreground disabled:opacity-40"
+                  >
+                    Use URLs
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-2">
               {urlInputs.map((url, i) => (

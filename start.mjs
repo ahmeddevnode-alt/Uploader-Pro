@@ -2,10 +2,8 @@
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn, spawnSync, execFileSync } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { createServer } from "node:net";
-import { createInterface } from "node:readline/promises";
-import { stdin, stdout } from "node:process";
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
 const envFile = resolve(rootDir, ".env");
@@ -77,11 +75,6 @@ const isWindows = process.platform === "win32";
 const pnpm = isWindows ? "pnpm.cmd" : "pnpm";
 const shell = isWindows;
 
-const rl = createInterface({ input: stdin, output: stdout });
-
-function ask(question) {
-  return rl.question(question);
-}
 
 // Check whether a port can be bound on the local machine.
 function isPortAvailable(port) {
@@ -96,202 +89,144 @@ function isPortAvailable(port) {
   });
 }
 
-// Find processes listening on the requested TCP port.
+// Identify processes listening on a TCP port.
 function findListeningPids(port) {
   try {
-    let output = "";
-
     if (isWindows) {
-      const command =
-        `Get-NetTCPConnection -LocalPort ${port} -State Listen ` +
-        "-ErrorAction SilentlyContinue | " +
-        "Select-Object -ExpandProperty OwningProcess -Unique";
-
-      output = execFileSync(
+      const output = execFileSync(
         "powershell.exe",
-        ["-NoProfile", "-Command", command],
+        [
+          "-NoProfile",
+          "-Command",
+          `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique`,
+        ],
         { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
       );
-    } else {
-      try {
-        output = execFileSync(
-          "lsof",
-          ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"],
-          { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-        );
-      } catch {
-        output = execFileSync(
-          "fuser",
-          ["-n", "tcp", String(port)],
-          { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-        );
+
+      return [...new Set(
+        output.split(/\s+/).map(Number).filter((pid) => Number.isInteger(pid) && pid > 0),
+      )];
+    }
+
+    const output = execFileSync("ss", ["-ltnpH"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+
+    const pids = [];
+
+    for (const line of output.split("\n")) {
+      if (!new RegExp(`:${port}\\s`).test(line)) continue;
+
+      for (const match of line.matchAll(/pid=(\d+)/g)) {
+        pids.push(Number(match[1]));
       }
     }
 
-    return [
-      ...new Set(
-        output
-          .split(/\s+/)
-          .map((value) => Number(value.trim()))
-          .filter((pid) => Number.isInteger(pid) && pid > 0),
-      ),
-    ];
+    return [...new Set(pids)];
   } catch {
     return [];
   }
 }
 
-// Get a readable process name for the confirmation prompt.
-function getProcessName(pid) {
-  try {
-    if (isWindows) {
-      const output = execFileSync(
-        "tasklist.exe",
-        ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-      );
-
-      return output.match(/^"([^"]+)"/)?.[1] ?? "Unknown process";
-    }
-
-    return (
-      execFileSync("ps", ["-p", String(pid), "-o", "comm="], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim() || "Unknown process"
+// Read the identity of a process before considering termination.
+function getProcessDetails(pid) {
+  if (isWindows) {
+    throw new Error(
+      "Automatic ownership verification is currently implemented for Linux. Refusing to terminate an unverified Windows process.",
     );
-  } catch {
-    return "Unknown process";
   }
-}
 
-function killProcess(pid) {
-  const result = isWindows
-    ? spawnSync(
-        "taskkill.exe",
-        ["/PID", String(pid), "/T", "/F"],
-        { stdio: "ignore", windowsHide: true },
-      )
-    : spawnSync("kill", ["-TERM", String(pid)], { stdio: "ignore" });
+  try {
+    const cwd = execFileSync(
+      "readlink",
+      ["-f", `/proc/${pid}/cwd`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
 
-  return !result.error && result.status === 0;
-}
+    const command = execFileSync(
+      "ps",
+      ["-p", String(pid), "-o", "args="],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
 
-function validatePort(value) {
-  const port = Number(value);
-
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return { cwd, command };
+  } catch {
     return null;
   }
-
-  return port;
 }
 
-// Resolve port conflicts interactively instead of crashing on EADDRINUSE.
-async function resolvePort(name, initialPort, getOtherPort) {
-  let port = initialPort;
+function isUploaderProcess(pid, service) {
+  const details = getProcessDetails(pid);
 
-  while (true) {
-    if (port === getOtherPort()) {
-      console.log(
-        `[start] ${name} port ${port} is already assigned to the other service.`,
+  if (!details) return false;
+
+  const expectedDirectory = resolve(
+    rootDir,
+    service === "API"
+      ? "artifacts/api-server"
+      : "artifacts/uploader-pro",
+  );
+
+  if (details.cwd !== expectedDirectory) return false;
+
+  if (service === "API") {
+    return /node/.test(details.command) &&
+      /dist[\\/]index\.mjs/.test(details.command);
+  }
+
+  return /vite(?:\.js)?(?:\s|$)/i.test(details.command);
+}
+
+// Stop only a verified Uploader-Pro process occupying its expected port.
+async function stopExistingService(name, port) {
+  console.log(`[start] Checking ${name} on port ${port}...`);
+
+  if (await isPortAvailable(port)) {
+    console.log(`[start] Port ${port} is already available.`);
+    return;
+  }
+
+  const pids = findListeningPids(port);
+
+  if (pids.length === 0) {
+    throw new Error(
+      `${name} port ${port} is occupied, but its process could not be identified. Refusing to kill an unknown process.`,
+    );
+  }
+
+  for (const pid of pids) {
+    if (!isUploaderProcess(pid, name)) {
+      const details = getProcessDetails(pid);
+
+      throw new Error(
+        `Port ${port} belongs to an unrelated or unverified process (PID ${pid}, ${details?.command ?? "unknown command"}). Refusing to terminate it.`,
       );
-    } else if (await isPortAvailable(port)) {
-      console.log(`[start] ${name} port ${port} is available.`);
-      return port;
-    } else {
-      console.log(`\n[start] ${name} port ${port} is already in use.`);
-
-      const pids = findListeningPids(port);
-
-      if (pids.length > 0) {
-        console.log("[start] Listening process(es):");
-
-        for (const pid of pids) {
-          console.log(`  PID ${pid}: ${getProcessName(pid)}`);
-        }
-      } else {
-        console.log(
-          "[start] Could not identify the process automatically.",
-        );
-      }
-
-      console.log("\nChoose an option:");
-      if (pids.length > 0) {
-        console.log("  K - Terminate the listed process(es)");
-      }
-      console.log("  P - Use a different port");
-      console.log("  Q - Quit");
-
-      const choice = (
-        await ask("Your choice: ")
-      ).trim().toLowerCase();
-
-      if (choice === "k" && pids.length > 0) {
-        let failed = false;
-
-        for (const pid of pids) {
-          if (pid === process.pid) {
-            console.log(
-              "[start] Refusing to terminate the current launcher process.",
-            );
-            failed = true;
-            continue;
-          }
-
-          console.log(`[start] Terminating PID ${pid}...`);
-
-          if (!killProcess(pid)) {
-            console.error(
-              `[start] Could not terminate PID ${pid}. Check your permissions.`,
-            );
-            failed = true;
-          }
-        }
-
-        // Give the operating system time to release the port.
-        await new Promise((resolveDelay) => setTimeout(resolveDelay, 700));
-
-        if (failed) {
-          console.log(
-            "[start] Some processes could not be terminated. Try another port.",
-          );
-        }
-
-        continue;
-      }
-
-      if (choice === "p") {
-        const answer = await ask(
-          `Enter a new ${name} port (1-65535): `,
-        );
-
-        const newPort = validatePort(answer.trim());
-
-        if (!newPort) {
-          console.log("[start] Invalid port number. Try again.");
-          continue;
-        }
-
-        if (newPort === getOtherPort()) {
-          console.log(
-            "[start] API and web app must use different ports. Try again.",
-          );
-          continue;
-        }
-
-        port = newPort;
-        continue;
-      }
-
-      if (choice === "q") {
-        throw new Error("Startup cancelled by user.");
-      }
-
-      console.log("[start] Invalid choice. Try again.");
-      continue;
     }
   }
+
+  for (const pid of pids) {
+    console.log(`[start] Stopping existing Uploader-Pro ${name} (PID ${pid})...`);
+
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
+  }
+
+  for (let attempt = 0; attempt < 50; attempt++) {
+    if (await isPortAvailable(port)) {
+      console.log(`[start] ${name} stopped; port ${port} is available.`);
+      return;
+    }
+
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 200));
+  }
+
+  throw new Error(
+    `${name} did not release port ${port} within 10 seconds. Refusing to force-kill an unverified process.`,
+  );
 }
 
 let apiPort;
@@ -305,16 +240,13 @@ try {
     throw new Error("API_PORT and WEB_PORT must be different.");
   }
 
-  apiPort = await resolvePort("API", apiPort, () => webPort);
-  webPort = await resolvePort("Web app", webPort, () => apiPort);
+  // Stop the old services before building and starting replacements.
+  await stopExistingService("API", apiPort);
+  await stopExistingService("Web app", webPort);
 } catch (error) {
   console.error("[start]", error.message);
-  rl.close();
   process.exit(1);
 }
-
-rl.close();
-
 if (!process.env.MONGO_URI) {
   console.warn(
     "[start] MONGO_URI is unset; the API will use local development state.",
